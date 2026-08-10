@@ -1,10 +1,32 @@
-```ts
+/**
+ * ============================================================
+ * TIPOS DA VISTORIA
+ * ============================================================
+ *
+ * Tipos compartilhados entre:
+ * - Checklist
+ * - Evidências
+ * - Áudio
+ * - Transcrição
+ * - Respostas
+ * - Vistoriador
+ *
+ * IMPORTANTE:
+ * Os IDs das entidades do banco são UUIDs.
+ */
+
+/**
+ * Status possível da avaliação de um requisito.
+ */
 export type StatusAvaliacao =
   | "nao_avaliado"
   | "conforme"
   | "ressalva"
   | "nao_possui";
 
+/**
+ * Nível de criticidade do requisito.
+ */
 export type Criticidade =
   | "critica"
   | "alta"
@@ -12,8 +34,7 @@ export type Criticidade =
   | "baixa";
 
 /**
- * Tipos de evidência que podem ser anexados
- * durante a vistoria.
+ * Tipos de evidência aceitos pela vistoria.
  */
 export type TipoEvidencia =
   | "foto"
@@ -22,7 +43,29 @@ export type TipoEvidencia =
   | "texto";
 
 /**
- * Evidência individual vinculada a uma resposta.
+ * Status do processamento de uma transcrição.
+ */
+export type StatusTranscricao =
+  | "pendente"
+  | "processando"
+  | "concluida"
+  | "erro";
+
+/**
+ * ============================================================
+ * EVIDÊNCIA
+ * ============================================================
+ *
+ * Uma evidência pode representar:
+ * - Foto
+ * - Documento/arquivo
+ * - Áudio
+ * - Texto
+ *
+ * O campo "url" pode representar:
+ * - blob:...                -> arquivo local temporário
+ * - URL do Supabase Storage -> arquivo persistido
+ * - caminho interno         -> dependendo do fluxo
  */
 export interface Evidencia {
   /**
@@ -36,11 +79,7 @@ export interface Evidencia {
   tipo: TipoEvidencia;
 
   /**
-   * URL pública ou caminho do arquivo
-   * no Supabase Storage.
-   *
-   * Opcional porque evidências de texto
-   * podem não possuir arquivo.
+   * URL ou caminho do arquivo.
    */
   url?: string;
 
@@ -50,12 +89,14 @@ export interface Evidencia {
   nome?: string;
 
   /**
-   * MIME type.
+   * MIME type do arquivo.
    *
    * Exemplos:
-   * image/jpeg
-   * audio/webm
-   * application/pdf
+   * - image/jpeg
+   * - image/png
+   * - audio/webm
+   * - audio/mp4
+   * - application/pdf
    */
   mimeType?: string;
 
@@ -67,88 +108,153 @@ export interface Evidencia {
   /**
    * Texto associado à evidência.
    *
-   * Usado principalmente para evidências
-   * do tipo "texto".
+   * Utilizado principalmente quando:
+   * tipo === "texto"
    */
   texto?: string;
 
   /**
-   * Transcrição associada à evidência de áudio.
+   * Transcrição do áudio.
+   *
+   * Pode ser preenchida depois que o
+   * processamento Speech-to-Text terminar.
    */
   transcricao?: string;
 
   /**
    * Duração do áudio em segundos.
+   *
+   * Utilizada quando:
+   * tipo === "audio"
    */
   duracao?: number;
 
   /**
-   * Data/hora em que a evidência foi registrada.
+   * Data/hora em que a evidência foi criada.
    */
   timestamp: string;
 }
 
 /**
- * Dados relacionados à transcrição de áudio.
+ * ============================================================
+ * TRANSCRIÇÃO DE ÁUDIO
+ * ============================================================
+ *
+ * Representa o estado do processamento
+ * Speech-to-Text de uma evidência de áudio.
  */
 export interface TranscricaoAudio {
   /**
-   * Texto produzido pela engine de transcrição.
+   * Texto transcrito.
+   *
+   * Durante os estados "pendente" e
+   * "processando", normalmente será vazio.
    */
   texto: string;
 
   /**
-   * Status da transcrição.
+   * Estado atual da transcrição.
    */
-  status:
-    | "pendente"
-    | "processando"
-    | "concluida"
-    | "erro";
+  status: StatusTranscricao;
 
   /**
-   * Identificador da evidência de áudio.
+   * Evidência de áudio relacionada.
    */
   evidenciaId?: string;
 
   /**
-   * Mensagem de erro, caso exista.
+   * Mensagem de erro do processamento.
    */
   erro?: string;
 
   /**
-   * Data/hora da transcrição.
+   * Data/hora da criação ou atualização
+   * da transcrição.
    */
   timestamp?: string;
 }
 
 /**
- * Usuário responsável pela vistoria.
+ * ============================================================
+ * VISTORIADOR
+ * ============================================================
+ *
+ * IMPORTANTE:
+ * O sistema utiliza UUID para identificação
+ * dos usuários/vistoriadores.
  */
 export interface Vistoriador {
-  id: number;
+  /**
+   * UUID do vistoriador.
+   */
+  id: string;
+
+  /**
+   * Nome completo.
+   */
   nome: string;
+
+  /**
+   * Função/cargo.
+   */
   funcao: string;
 }
 
 /**
- * Requisito do checklist.
+ * ============================================================
+ * REQUISITO
+ * ============================================================
+ *
+ * Requisito pertencente ao checklist.
  *
  * IMPORTANTE:
- * id = UUID interno do banco.
- * codigo = código funcional, como LAB-01, CME-01 etc.
+ *
+ * id     = UUID interno do banco
+ * codigo = código funcional
+ *
+ * Exemplos:
+ * LAB-01
+ * CME-01
+ * ENG-05
  */
 export interface Requisito {
+  /**
+   * UUID do requisito.
+   */
   id: string;
+
+  /**
+   * Código funcional do requisito.
+   */
   codigo: string;
+
+  /**
+   * Pergunta/descrição apresentada ao vistoriador.
+   */
   pergunta: string;
+
+  /**
+   * Categoria do requisito.
+   */
   categoria: string;
+
+  /**
+   * Criticidade.
+   */
   criticidade: Criticidade;
+
+  /**
+   * Referências normativas/técnicas.
+   */
   referencias: string[];
 }
 
 /**
- * Resposta de um requisito durante a vistoria.
+ * ============================================================
+ * RESPOSTA
+ * ============================================================
+ *
+ * Resultado de um requisito durante uma vistoria.
  */
 export interface Resposta {
   /**
@@ -162,39 +268,42 @@ export interface Resposta {
   status: StatusAvaliacao;
 
   /**
-   * Observação digitada manualmente.
+   * Observação técnica digitada manualmente.
    */
   observacao?: string;
 
   /**
-   * Dados da transcrição de áudio.
+   * Transcrição do áudio relacionado
+   * ao requisito.
    *
-   * Mantido para compatibilidade
-   * com o fluxo atual.
+   * Mantido separadamente das evidências
+   * para facilitar o fluxo da interface.
    */
   transcricao?: TranscricaoAudio;
 
   /**
-   * Todas as evidências vinculadas
-   * a este requisito.
+   * Lista de evidências relacionadas
+   * ao requisito.
    *
-   * Um requisito pode possuir várias:
-   * - fotos
-   * - arquivos
-   * - áudios
-   * - textos
+   * Pode conter:
+   * - Fotos
+   * - Arquivos
+   * - Áudios
+   * - Textos
    */
   evidencias?: Evidencia[];
 
   /**
-   * Mantido para compatibilidade
-   * com a estrutura antiga.
+   * Compatibilidade com estrutura antiga.
+   *
+   * Contém URLs de fotos.
    */
   fotos?: string[];
 
   /**
-   * Mantido para compatibilidade
-   * durante a migração da estrutura antiga.
+   * Compatibilidade com estrutura antiga.
+   *
+   * URL do áudio principal.
    */
   audioUrl?: string;
 
@@ -205,17 +314,26 @@ export interface Resposta {
 }
 
 /**
- * Estado geral da vistoria.
+ * ============================================================
+ * ESTADO DA VISTORIA
+ * ============================================================
  */
 export interface VistoriaState {
+  /**
+   * Local onde a vistoria está sendo realizada.
+   */
   local: string;
 
+  /**
+   * Vistoriador atualmente selecionado.
+   */
   vistoriador: Vistoriador | null;
 
   /**
-   * As respostas são indexadas pelo UUID
-   * do requisito.
+   * Respostas indexadas pelo UUID do requisito.
+   *
+   * Exemplo:
+   * respostas[requisito.id]
    */
   respostas: Record<string, Resposta>;
 }
-```
