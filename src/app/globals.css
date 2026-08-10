@@ -1,12 +1,30 @@
-@tailwind base;
-@tailwind components;
-@tailwind utilities;
+@import "tailwindcss";
+
+@theme {
+  --color-vistoria-lightest: #96d2d9;
+  --color-vistoria-sky: #84c9ec;
+  --color-vistoria-teal: #78c2c4;
+  --color-vistoria-blue: #50aeea;
+  --color-vistoria-dark-teal: #3e9fbc;
+  --color-vistoria-greenish: #3eb6ad;
+  --color-vistoria-dark: #1e84a6;
+
+  --color-acao-conforme: #10B981;
+  --color-acao-ressalva: #F59E0B;
+  --color-acao-naopossui: #EF4444;
+
+  --color-gray-light: #f9fafb;
+}
 
 @layer base {
   body {
-    @apply bg-gray-50 text-slate-800 antialiased;
+    background-color: var(--color-gray-light);
+    color: #1e293b; /* Equivalente a text-slate-800 */
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+
     /* Padrão geométrico suave para o fundo */
-    background-image: radial-gradient(#96d2d9 0.5px, transparent 0.5px), radial-gradient(#96d2d9 0.5px, #f9fafb 0.5px);
+    background-image: radial-gradient(var(--color-vistoria-lightest) 0.5px, transparent 0.5px), radial-gradient(var(--color-vistoria-lightest) 0.5px, var(--color-gray-light) 0.5px);
     background-size: 20px 20px;
     background-position: 0 0, 10px 10px;
   }

@@ -73,7 +73,7 @@ export default function PreImplantacaoApp() {
   // ==========================================
   if (view === "dashboard") {
     return (
-      <main className="max-w-md mx-auto min-h-screen bg-gray-50 flex flex-col relative shadow-2xl">
+      <main className="max-w-md mx-auto min-h-screen bg-gray-light flex flex-col relative shadow-2xl">
         <div className="bg-vistoria-dark text-white p-6 rounded-b-[2rem] shadow-lg relative overflow-hidden">
           {/* Polígonos decorativos */}
           <div className="absolute top-0 right-0 w-32 h-32 bg-white opacity-5 rotate-45 transform translate-x-10 -translate-y-10"></div>
@@ -118,7 +118,7 @@ export default function PreImplantacaoApp() {
 
           <button 
             onClick={() => setView("matriz")}
-            className="w-full py-4 bg-white text-vistoria-dark border-2 border-vistoria-teal rounded-2xl font-bold text-lg active:bg-gray-50 transition-all flex justify-center items-center gap-2"
+            className="w-full py-4 bg-white text-vistoria-dark border-2 border-vistoria-teal rounded-2xl font-bold text-lg active:bg-gray-light transition-all flex justify-center items-center gap-2"
           >
             <BarChart2 size={24} />
             VER MATRIZ ({pendencias.length})
@@ -173,6 +173,12 @@ export default function PreImplantacaoApp() {
   // VIEW: VISTORIA (FERRAMENTA DE CAMPO)
   // ==========================================
   const requisitoAtual = checklist[currentIndex];
+
+  // Se não houver mais requisitos, volta para o dashboard.
+  if (!requisitoAtual) {
+    setView("dashboard");
+    return null;
+  }
   
   return (
     <main className="max-w-md mx-auto min-h-screen bg-white shadow-2xl flex flex-col relative overflow-hidden">
