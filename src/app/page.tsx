@@ -5,14 +5,16 @@ import {
   AlertTriangle,
   ArrowLeft,
   ArrowRight,
-  BarChart2,
+  BarChart3,
   Camera,
   Check,
-  CheckCircle2,
+  ChevronDown,
+  ChevronLeft,
   ChevronRight,
   ClipboardCheck,
   FileText,
   Home,
+  Image as ImageIcon,
   Menu,
   Plus,
   UserPlus,
@@ -22,11 +24,7 @@ import {
 } from "lucide-react";
 
 import { checklist } from "@/data/checklist";
-import {
-  StatusAvaliacao,
-  Vistoriador,
-} from "@/types/vistoria";
-
+import { StatusAvaliacao, Vistoriador } from "@/types/vistoria";
 import { supabase } from "./supabaseClient";
 
 /* =========================================================
@@ -55,10 +53,20 @@ type Resposta = {
   timestamp: string;
 };
 
-type VistoriaLocal = {
-  local: string;
-  vistoriador: Vistoriador | null;
-  respostas: Record<string, Resposta>;
+type Respostas = Record<string, Resposta>;
+
+/* =========================================================
+   PALETA
+========================================================= */
+
+const COLORS = {
+  ice: "#9AD3E1",
+  sky: "#81CDEB",
+  metallic: "#84CAD8",
+  cerulean: "#54B4E7",
+  petrol: "#40ABC9",
+  turquoise: "#43C3BC",
+  dark: "#1C85A8",
 };
 
 /* =========================================================
@@ -66,33 +74,47 @@ type VistoriaLocal = {
 ========================================================= */
 
 export default function PreImplantacaoApp() {
-  /* =======================================================
-     ESTADOS
-  ======================================================= */
+  /* -------------------------------------------------------
+     NAVEGAÇÃO
+  ------------------------------------------------------- */
 
   const [view, setView] = useState<ViewState>("dashboard");
+
+  const [currentIndex, setCurrentIndex] = useState(0);
+
+  const [isMenuOpen, setIsMenuOpen] = useState(false);
+
+  const [isSidebarCollapsed, setIsSidebarCollapsed] =
+    useState(false);
+
+  /* -------------------------------------------------------
+     VISTORIA
+  ------------------------------------------------------- */
 
   const [activeVistoriaId, setActiveVistoriaId] =
     useState<string | null>(null);
 
-  const [vistoria, setVistoria] =
-    useState<VistoriaLocal>({
-      local: "Hospital Base",
-      vistoriador: null,
-      respostas: {},
-    });
+  const [vistoria, setVistoria] = useState<{
+    local: string;
+    vistoriador: Vistoriador | null;
+    respostas: Respostas;
+  }>({
+    local: "Hospital Base",
+    vistoriador: null,
+    respostas: {},
+  });
 
-  const [vistoriadores, setVistoriadores] =
-    useState<Vistoriador[]>([]);
+  /* -------------------------------------------------------
+     VISTORIADORES
+  ------------------------------------------------------- */
 
-  const [currentIndex, setCurrentIndex] = useState(0);
+  const [vistoriadores, setVistoriadores] = useState<
+    Vistoriador[]
+  >([]);
 
-  const [isLoaded, setIsLoaded] = useState(false);
-
-  const [isMenuOpen, setIsMenuOpen] = useState(false);
-
-  const [filtroRelatorio, setFiltroRelatorio] =
-    useState<FiltroRelatorio>("todos");
+  /* -------------------------------------------------------
+     MODAIS
+  ------------------------------------------------------- */
 
   const [modalAberto, setModalAberto] =
     useState<ModalState>(null);
@@ -101,11 +123,23 @@ export default function PreImplantacaoApp() {
 
   const [fotosTemp, setFotosTemp] = useState<File[]>([]);
 
-  const [novoVistoriador, setNovoVistoriador] =
-    useState({
-      nome: "",
-      funcao: "",
-    });
+  const [novoVistoriador, setNovoVistoriador] = useState({
+    nome: "",
+    funcao: "",
+  });
+
+  /* -------------------------------------------------------
+     RELATÓRIO
+  ------------------------------------------------------- */
+
+  const [filtroRelatorio, setFiltroRelatorio] =
+    useState<FiltroRelatorio>("todos");
+
+  /* -------------------------------------------------------
+     ESTADO
+  ------------------------------------------------------- */
+
+  const [isLoaded, setIsLoaded] = useState(false);
 
   const [isSaving, setIsSaving] = useState(false);
 
@@ -116,6 +150,10 @@ export default function PreImplantacaoApp() {
   useEffect(() => {
     const loadInitialData = async () => {
       try {
+        /* -----------------------------------------------
+           BUSCA VISTORIADORES
+        ------------------------------------------------ */
+
         const {
           data: vistoriadoresData,
           error: vistoriadoresError,
@@ -130,8 +168,14 @@ export default function PreImplantacaoApp() {
             vistoriadoresError
           );
         } else {
-          setVistoriadores(vistoriadoresData || []);
+          setVistoriadores(
+            (vistoriadoresData || []) as Vistoriador[]
+          );
         }
+
+        /* -----------------------------------------------
+           RECUPERA VISTORIA ATIVA
+        ------------------------------------------------ */
 
         const lastVistoriaId = localStorage.getItem(
           "@active-vistoria-id"
@@ -153,27 +197,18 @@ export default function PreImplantacaoApp() {
             setActiveVistoriaId(vistoriaData.id);
 
             setVistoria({
-              local: vistoriaData.local || "Hospital Base",
-              respostas: vistoriaData.respostas || {},
+              local:
+                vistoriaData.local || "Hospital Base",
+              respostas:
+                vistoriaData.respostas || {},
               vistoriador:
                 vistoriaData.vistoriador || null,
             });
-
-            const respostas =
-              vistoriaData.respostas || {};
-
-            const primeiroPendente = checklist.findIndex(
-              (item) => !respostas[item.id]
-            );
-
-            if (primeiroPendente >= 0) {
-              setCurrentIndex(primeiroPendente);
-            }
           }
         }
       } catch (error) {
         console.error(
-          "Erro ao carregar dados iniciais:",
+          "Erro no carregamento inicial:",
           error
         );
       } finally {
@@ -185,11 +220,15 @@ export default function PreImplantacaoApp() {
   }, []);
 
   /* =======================================================
-     SALVAR VISTORIA NO BANCO
+     ATUALIZAÇÃO DA VISTORIA NO BANCO
   ======================================================= */
 
   const updateVistoriaInDb = async (
-    updates: Partial<VistoriaLocal>
+    updates: Partial<{
+      local: string;
+      respostas: Respostas;
+      vistoriador: Vistoriador | null;
+    }>
   ) => {
     if (!activeVistoriaId) return;
 
@@ -205,7 +244,7 @@ export default function PreImplantacaoApp() {
 
     if (updates.vistoriador !== undefined) {
       dbUpdates.vistoriador_id =
-        updates.vistoriador?.id || null;
+        updates.vistoriador?.id ?? null;
     }
 
     if (Object.keys(dbUpdates).length === 0) {
@@ -229,11 +268,15 @@ export default function PreImplantacaoApp() {
   };
 
   /* =======================================================
-     ATUALIZAR VISTORIA
+     ATUALIZA ESTADO DA VISTORIA
   ======================================================= */
 
   const handleSetVistoria = (
-    updates: Partial<VistoriaLocal>
+    updates: Partial<{
+      local: string;
+      respostas: Respostas;
+      vistoriador: Vistoriador | null;
+    }>
   ) => {
     setVistoria((prev) => ({
       ...prev,
@@ -256,50 +299,79 @@ export default function PreImplantacaoApp() {
   };
 
   /* =======================================================
-     ADICIONAR VISTORIADOR
+     NOVO VISTORIADOR
   ======================================================= */
 
   const handleAddVistoriador = async () => {
-    if (
-      !novoVistoriador.nome.trim() ||
-      !novoVistoriador.funcao.trim()
-    ) {
+    const nome = novoVistoriador.nome.trim();
+    const funcao = novoVistoriador.funcao.trim();
+
+    if (!nome || !funcao) {
       return;
     }
 
-    const { data, error } = await supabase
-      .from("vistoriadores")
-      .insert([
-        {
-          nome: novoVistoriador.nome.trim(),
-          funcao: novoVistoriador.funcao.trim(),
-        },
-      ])
-      .select("id, nome, funcao")
-      .single();
+    setIsSaving(true);
 
-    if (error) {
-      console.error(
-        "Erro ao adicionar vistoriador:",
-        error
+    try {
+      const { data, error } = await supabase
+        .from("vistoriadores")
+        .insert([
+          {
+            nome,
+            funcao,
+          },
+        ])
+        .select("id, nome, funcao")
+        .single();
+
+      if (error) {
+        console.error(
+          "Erro ao adicionar vistoriador:",
+          error
+        );
+
+        alert(
+          `Não foi possível cadastrar o vistoriador.\n\n${error.message}`
+        );
+
+        return;
+      }
+
+      if (!data) {
+        return;
+      }
+
+      const novo = data as Vistoriador;
+
+      /* adiciona à lista */
+      setVistoriadores((prev) =>
+        [...prev, novo].sort((a, b) =>
+          a.nome.localeCompare(b.nome)
+        )
       );
-      return;
-    }
 
-    if (data) {
-      setVistoriadores((prev) => [
-        ...prev,
-        data,
-      ]);
+      /* seleciona automaticamente */
+      handleSetVistoriador(novo);
 
-      handleSetVistoriador(data);
-
-      setModalAberto(null);
-
+      /* limpa formulário */
       setNovoVistoriador({
         nome: "",
         funcao: "",
       });
+
+      /* fecha modal */
+      setModalAberto(null);
+    } catch (error) {
+      console.error(
+        "Erro inesperado ao adicionar vistoriador:",
+        error
+      );
+
+      alert(
+        "Ocorreu um erro inesperado ao cadastrar o vistoriador."
+      );
+    } finally {
+      setIsSaving(false);
     }
   };
 
@@ -342,36 +414,48 @@ export default function PreImplantacaoApp() {
     let vistoriaId = activeVistoriaId;
 
     if (!vistoriaId) {
-      const {
-        data,
-        error,
-      } = await supabase
-        .from("vistorias")
-        .insert({
-          local: vistoria.local,
-          vistoriador_id:
-            vistoria.vistoriador.id,
-          respostas: {},
-        })
-        .select()
-        .single();
+      setIsSaving(true);
 
-      if (error || !data) {
-        console.error(
-          "Erro ao iniciar nova vistoria:",
-          error
+      try {
+        const { data, error } = await supabase
+          .from("vistorias")
+          .insert({
+            local: vistoria.local,
+            vistoriador_id:
+              vistoria.vistoriador.id,
+            respostas: {},
+          })
+          .select()
+          .single();
+
+        if (error) {
+          console.error(
+            "Erro ao iniciar nova vistoria:",
+            error
+          );
+
+          alert(
+            `Não foi possível iniciar a vistoria.\n\n${error.message}`
+          );
+
+          return;
+        }
+
+        if (!data) {
+          return;
+        }
+
+        vistoriaId = data.id;
+
+        setActiveVistoriaId(data.id);
+
+        localStorage.setItem(
+          "@active-vistoria-id",
+          data.id
         );
-        return;
+      } finally {
+        setIsSaving(false);
       }
-
-      vistoriaId = data.id;
-
-      setActiveVistoriaId(data.id);
-
-      localStorage.setItem(
-        "@active-vistoria-id",
-        data.id
-      );
     }
 
     if (startIndex !== undefined) {
@@ -388,33 +472,33 @@ export default function PreImplantacaoApp() {
   const abrirCategoria = (
     categoria: string
   ) => {
-    if (!vistoria.vistoriador) return;
+    const primeiroPendente =
+      checklist.findIndex(
+        (item) =>
+          item.categoria === categoria &&
+          !vistoria.respostas[item.id]
+      );
 
-    const pendente = checklist.findIndex(
-      (item) =>
-        item.categoria === categoria &&
-        !vistoria.respostas[item.id]
-    );
+    const primeiroDaCategoria =
+      checklist.findIndex(
+        (item) =>
+          item.categoria === categoria
+      );
 
-    const primeiro = checklist.findIndex(
-      (item) =>
-        item.categoria === categoria
-    );
+    const index =
+      primeiroPendente !== -1
+        ? primeiroPendente
+        : primeiroDaCategoria;
 
-    void handleStartVistoria(
-      pendente !== -1
-        ? pendente
-        : primeiro
-    );
+    void handleStartVistoria(index);
   };
 
   /* =======================================================
-     DADOS CALCULADOS
+     CÁLCULOS
   ======================================================= */
 
-  const totalAvaliados = Object.keys(
-    vistoria.respostas
-  ).length;
+  const totalAvaliados =
+    Object.keys(vistoria.respostas).length;
 
   const progressoTotal =
     checklist.length > 0
@@ -425,30 +509,29 @@ export default function PreImplantacaoApp() {
         )
       : 0;
 
-  const contagem = {
-    conforme: Object.values(
-      vistoria.respostas
-    ).filter(
-      (r) => r.status === "conforme"
-    ).length,
-
-    ressalva: Object.values(
-      vistoria.respostas
-    ).filter(
-      (r) => r.status === "ressalva"
-    ).length,
-
-    naopossui: Object.values(
-      vistoria.respostas
-    ).filter(
-      (r) => r.status === "nao_possui"
-    ).length,
-  };
-
-  const todasAsRespostas =
-    Object.values(
+  const contagem = useMemo(() => {
+    const respostas = Object.values(
       vistoria.respostas
     );
+
+    return {
+      conforme: respostas.filter(
+        (r) => r.status === "conforme"
+      ).length,
+
+      ressalva: respostas.filter(
+        (r) => r.status === "ressalva"
+      ).length,
+
+      naopossui: respostas.filter(
+        (r) => r.status === "nao_possui"
+      ).length,
+    };
+  }, [vistoria.respostas]);
+
+  const todasAsRespostas = Object.values(
+    vistoria.respostas
+  );
 
   const categorias = useMemo(
     () =>
@@ -462,48 +545,52 @@ export default function PreImplantacaoApp() {
     []
   );
 
-  const resumoCategorias =
-    categorias.map((cat) => {
+  const resumoCategorias = useMemo(() => {
+    return categorias.map((categoria) => {
       const itens = checklist.filter(
         (item) =>
-          item.categoria === cat
+          item.categoria === categoria
       );
 
-      const status = (
-        s: StatusAvaliacao
-      ) =>
-        itens.filter(
-          (item) =>
-            vistoria.respostas[
-              item.id
-            ]?.status === s
-        ).length;
+      const feitos = itens.filter(
+        (item) =>
+          vistoria.respostas[item.id]
+      ).length;
+
+      const conforme = itens.filter(
+        (item) =>
+          vistoria.respostas[item.id]
+            ?.status === "conforme"
+      ).length;
+
+      const ressalva = itens.filter(
+        (item) =>
+          vistoria.respostas[item.id]
+            ?.status === "ressalva"
+      ).length;
+
+      const naoPossui = itens.filter(
+        (item) =>
+          vistoria.respostas[item.id]
+            ?.status === "nao_possui"
+      ).length;
 
       return {
-        cat,
+        cat: categoria,
         total: itens.length,
-        feitos: itens.filter(
-          (item) =>
-            vistoria.respostas[
-              item.id
-            ]
-        ).length,
-        conforme: status("conforme"),
-        ressalva: status("ressalva"),
-        naoPossui:
-          status("nao_possui"),
+        feitos,
+        conforme,
+        ressalva,
+        naoPossui,
       };
     });
+  }, [
+    categorias,
+    vistoria.respostas,
+  ]);
 
   /* =======================================================
-     REQUISITO ATUAL
-  ======================================================= */
-
-  const requisitoAtual =
-    checklist[currentIndex];
-
-  /* =======================================================
-     NAVEGAÇÃO
+     NAVEGAÇÃO DO CHECKLIST
   ======================================================= */
 
   const navigateToRequisito = (
@@ -517,7 +604,6 @@ export default function PreImplantacaoApp() {
     if (index !== -1) {
       setCurrentIndex(index);
       setIsMenuOpen(false);
-      setView("vistoria");
     }
   };
 
@@ -544,10 +630,6 @@ export default function PreImplantacaoApp() {
     tab: ViewState
   ) => {
     if (tab === "vistoria") {
-      if (!vistoria.vistoriador) {
-        return;
-      }
-
       void handleStartVistoria();
       return;
     }
@@ -556,19 +638,25 @@ export default function PreImplantacaoApp() {
   };
 
   /* =======================================================
-     AVALIAÇÃO
+     REGISTRAR AVALIAÇÃO
   ======================================================= */
 
   const registrarAvaliacao = async (
     status: StatusAvaliacao,
     observacao = ""
   ) => {
-    if (!requisitoAtual) return;
+    const requisitoAtual =
+      checklist[currentIndex];
+
+    if (!requisitoAtual) {
+      return;
+    }
 
     if (!activeVistoriaId) {
-      console.error(
-        "Não é possível registrar avaliação sem uma vistoria ativa."
+      alert(
+        "Não existe uma vistoria ativa."
       );
+
       return;
     }
 
@@ -584,16 +672,12 @@ export default function PreImplantacaoApp() {
       if (fotosTemp.length > 0) {
         for (const file of fotosTemp) {
           const fileExt =
-            file.name
-              .split(".")
-              .pop() || "jpg";
+            file.name.split(".").pop() ||
+            "jpg";
 
-          const filePath =
-            `${activeVistoriaId}/` +
-            `${requisitoAtual.id}/` +
-            `${Date.now()}-${Math.random()
-              .toString(36)
-              .slice(2)}.${fileExt}`;
+          const filePath = `${activeVistoriaId}/${requisitoAtual.id}/${Date.now()}-${Math.random()
+            .toString(36)
+            .slice(2)}.${fileExt}`;
 
           const {
             error: uploadError,
@@ -610,15 +694,17 @@ export default function PreImplantacaoApp() {
               uploadError
             );
 
+            alert(
+              `Erro ao enviar a foto.\n\n${uploadError.message}`
+            );
+
             return;
           }
 
           const {
             data: urlData,
           } = supabase.storage
-            .from(
-              "fotos_vistorias"
-            )
+            .from("fotos_vistorias")
             .getPublicUrl(
               filePath
             );
@@ -640,23 +726,23 @@ export default function PreImplantacaoApp() {
       const novaResposta: Resposta = {
         requisitoId:
           requisitoAtual.id,
-
         status,
-
         observacao:
           observacao.trim(),
-
         fotos: urlsFotos,
-
         timestamp:
           new Date().toISOString(),
       };
 
-      const novasRespostas = {
+      const novasRespostas: Respostas = {
         ...vistoria.respostas,
         [requisitoAtual.id]:
           novaResposta,
       };
+
+      /* -----------------------------------------------
+         ESTADO + BANCO
+      ------------------------------------------------ */
 
       setVistoria((prev) => ({
         ...prev,
@@ -685,11 +771,15 @@ export default function PreImplantacaoApp() {
         currentIndex <
         checklist.length - 1
       ) {
-        setCurrentIndex(
-          (prev) => prev + 1
-        );
+        setTimeout(() => {
+          setCurrentIndex(
+            (prev) => prev + 1
+          );
+        }, 120);
       } else {
-        setView("dashboard");
+        setTimeout(() => {
+          setView("relatorio");
+        }, 180);
       }
     } finally {
       setIsSaving(false);
@@ -697,242 +787,305 @@ export default function PreImplantacaoApp() {
   };
 
   /* =======================================================
-     TECLADO
-  ======================================================= */
-
-  useEffect(() => {
-    if (view !== "vistoria") {
-      return;
-    }
-
-    const handleKeyboard = (
-      event: KeyboardEvent
-    ) => {
-      if (
-        event.target instanceof
-          HTMLInputElement ||
-        event.target instanceof
-          HTMLTextAreaElement
-      ) {
-        return;
-      }
-
-      if (event.key === "ArrowLeft") {
-        goPrevious();
-      }
-
-      if (event.key === "ArrowRight") {
-        goNext();
-      }
-
-      if (event.key === "Escape") {
-        setIsMenuOpen(false);
-        setModalAberto(null);
-      }
-    };
-
-    window.addEventListener(
-      "keydown",
-      handleKeyboard
-    );
-
-    return () => {
-      window.removeEventListener(
-        "keydown",
-        handleKeyboard
-      );
-    };
-  }, [
-    view,
-    currentIndex,
-  ]);
-
-  /* =======================================================
-     SIDEBAR
+     TOPIC SIDEBAR
   ======================================================= */
 
   const topicListNav = (
-    <aside className="h-full bg-slate-950 text-white border-r border-white/10 flex flex-col">
-      {/* HEADER SIDEBAR */}
+    <aside
+      className={`
+        h-full
+        bg-white/65
+        backdrop-blur-2xl
+        border-r
+        border-white/70
+        shadow-[8px_0_40px_rgba(28,133,168,0.10)]
+        overflow-hidden
+        transition-all
+        duration-300
+        ${
+          isSidebarCollapsed
+            ? "w-[68px]"
+            : "w-[290px]"
+        }
+      `}
+    >
+      {/* Cabeçalho */}
 
-      <div className="p-5 border-b border-white/10">
-        <div className="flex items-center justify-between gap-3">
+      <div
+        className="
+          flex
+          items-center
+          justify-between
+          gap-3
+          p-4
+          border-b
+          border-white/70
+        "
+      >
+        {!isSidebarCollapsed && (
           <div>
-            <p className="text-[10px] tracking-[0.25em] text-cyan-400 font-bold">
-              VISTORIA
+            <p
+              className="text-[10px] font-black tracking-[0.2em]"
+              style={{
+                color: COLORS.dark,
+              }}
+            >
+              NAVEGAÇÃO
             </p>
 
-            <h2 className="text-lg font-black">
-              Navegação
-            </h2>
+            <p className="text-sm font-bold text-slate-700">
+              Tópicos da Vistoria
+            </p>
           </div>
+        )}
 
-          <button
-            onClick={() =>
-              setIsMenuOpen(false)
-            }
-            className="lg:hidden p-2 rounded-lg bg-white/5 hover:bg-white/10"
-          >
-            <X size={18} />
-          </button>
-        </div>
-      </div>
-
-      {/* PROGRESSO */}
-
-      <div className="p-5 border-b border-white/10">
-        <div className="flex justify-between items-end mb-2">
-          <div>
-            <span className="text-xs text-slate-400">
-              PROGRESSO
-            </span>
-
-            <div className="text-2xl font-black">
-              {progressoTotal}%
-            </div>
-          </div>
-
-          <span className="text-xs text-slate-500">
-            {totalAvaliados}/
-            {checklist.length}
-          </span>
-        </div>
-
-        <div className="h-1.5 bg-white/10 rounded-full overflow-hidden">
-          <div
-            className="h-full bg-gradient-to-r from-cyan-400 to-blue-500 transition-all duration-500"
-            style={{
-              width: `${progressoTotal}%`,
-            }}
-          />
-        </div>
-      </div>
-
-      {/* REQUISITOS */}
-
-      <div className="flex-1 overflow-y-auto p-3">
-        {categorias.map((cat) => (
-          <div
-            key={cat}
-            className="mb-4"
-          >
-            <div className="px-3 py-2 text-[10px] font-black tracking-[0.18em] text-slate-500 uppercase">
-              {cat}
-            </div>
-
-            <div className="space-y-1">
-              {checklist
-                .filter(
-                  (item) =>
-                    item.categoria === cat
-                )
-                .map((req) => {
-                  const resposta =
-                    vistoria
-                      .respostas[
-                      req.id
-                    ];
-
-                  const isCurrent =
-                    req.id ===
-                    requisitoAtual?.id;
-
-                  return (
-                    <button
-                      key={req.id}
-                      onClick={() =>
-                        navigateToRequisito(
-                          req.id
-                        )
-                      }
-                      className={`
-                        w-full text-left
-                        px-3 py-3
-                        rounded-xl
-                        flex items-center gap-3
-                        transition-all
-                        border
-                        ${
-                          isCurrent
-                            ? "bg-cyan-400/10 border-cyan-400/30 shadow-[0_0_20px_rgba(34,211,238,0.08)]"
-                            : "border-transparent hover:bg-white/5"
-                        }
-                      `}
-                    >
-                      <span className="shrink-0">
-                        {!resposta ? (
-                          <span className="w-5 h-5 rounded-full border border-slate-600 block" />
-                        ) : resposta.status ===
-                          "conforme" ? (
-                          <CheckCircle2
-                            size={19}
-                            className="text-emerald-400"
-                          />
-                        ) : resposta.status ===
-                          "ressalva" ? (
-                          <AlertTriangle
-                            size={19}
-                            className="text-amber-400"
-                          />
-                        ) : (
-                          <XCircle
-                            size={19}
-                            className="text-rose-400"
-                          />
-                        )}
-                      </span>
-
-                      <span className="flex-1 min-w-0">
-                        <span className="block text-[10px] text-slate-500 mb-0.5">
-                          {req.codigo}
-                        </span>
-
-                        <span
-                          className={`
-                            block text-xs font-medium
-                            ${
-                              isCurrent
-                                ? "text-cyan-100"
-                                : "text-slate-300"
-                            }
-                          `}
-                        >
-                          {req.pergunta}
-                        </span>
-                      </span>
-
-                      {isCurrent && (
-                        <ChevronRight
-                          size={15}
-                          className="text-cyan-400 shrink-0"
-                        />
-                      )}
-                    </button>
-                  );
-                })}
-            </div>
-          </div>
-        ))}
-      </div>
-
-      {/* FOOTER SIDEBAR */}
-
-      <div className="p-4 border-t border-white/10">
         <button
           onClick={() =>
-            setView("dashboard")
+            setIsSidebarCollapsed(
+              (prev) => !prev
+            )
           }
-          className="w-full flex items-center gap-3 px-4 py-3 rounded-xl bg-white/5 hover:bg-white/10 text-sm font-bold"
+          className="
+            w-9
+            h-9
+            rounded-xl
+            flex
+            items-center
+            justify-center
+            bg-white/80
+            border
+            border-white
+            shadow-sm
+            hover:scale-105
+            transition-transform
+          "
+          style={{
+            color: COLORS.dark,
+          }}
+          title={
+            isSidebarCollapsed
+              ? "Expandir menu"
+              : "Recolher menu"
+          }
         >
-          <Home size={18} />
-          Voltar ao início
+          {isSidebarCollapsed ? (
+            <ChevronRight size={18} />
+          ) : (
+            <ChevronLeft size={18} />
+          )}
         </button>
+      </div>
+
+      {/* Lista */}
+
+      <div className="p-3 space-y-2 overflow-y-auto h-[calc(100%-73px)]">
+        {categorias.map(
+          (categoria) => {
+            const itens =
+              checklist.filter(
+                (item) =>
+                  item.categoria ===
+                  categoria
+              );
+
+            const feitos =
+              itens.filter(
+                (item) =>
+                  vistoria.respostas[
+                    item.id
+                  ]
+              ).length;
+
+            const percentual =
+              itens.length > 0
+                ? Math.round(
+                    (feitos /
+                      itens.length) *
+                      100
+                  )
+                : 0;
+
+            return (
+              <div
+                key={categoria}
+                className="rounded-2xl overflow-hidden"
+              >
+                <button
+                  onClick={() =>
+                    abrirCategoria(
+                      categoria
+                    )
+                  }
+                  className="
+                    w-full
+                    text-left
+                    p-3
+                    bg-white/55
+                    hover:bg-white/85
+                    border
+                    border-white/70
+                    transition-all
+                  "
+                >
+                  <div className="flex items-center gap-3">
+                    <div
+                      className="
+                        w-9
+                        h-9
+                        rounded-xl
+                        flex
+                        items-center
+                        justify-center
+                        shrink-0
+                      "
+                      style={{
+                        background:
+                          "rgba(67,195,188,0.16)",
+                        color:
+                          COLORS.dark,
+                      }}
+                    >
+                      <ClipboardCheck
+                        size={17}
+                      />
+                    </div>
+
+                    {!isSidebarCollapsed && (
+                      <div className="flex-1 min-w-0">
+                        <div className="flex justify-between gap-2">
+                          <span className="text-xs font-bold text-slate-700 truncate">
+                            {categoria}
+                          </span>
+
+                          <span
+                            className="text-[10px] font-black"
+                            style={{
+                              color:
+                                COLORS.dark,
+                            }}
+                          >
+                            {feitos}/
+                            {
+                              itens.length
+                            }
+                          </span>
+                        </div>
+
+                        <div className="mt-2 h-1.5 bg-slate-200/70 rounded-full overflow-hidden">
+                          <div
+                            className="h-full rounded-full transition-all duration-500"
+                            style={{
+                              width: `${percentual}%`,
+                              background:
+                                `linear-gradient(90deg, ${COLORS.petrol}, ${COLORS.turquoise})`,
+                            }}
+                          />
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                </button>
+
+                {!isSidebarCollapsed && (
+                  <div className="px-1 pt-1 space-y-1">
+                    {itens.map(
+                      (req) => {
+                        const resposta =
+                          vistoria
+                            .respostas[
+                            req.id
+                          ];
+
+                        const isCurrent =
+                          req.id ===
+                          checklist[
+                            currentIndex
+                          ]?.id;
+
+                        return (
+                          <button
+                            key={req.id}
+                            onClick={() =>
+                              navigateToRequisito(
+                                req.id
+                              )
+                            }
+                            className={`
+                              w-full
+                              text-left
+                              flex
+                              items-center
+                              gap-2
+                              px-3
+                              py-2
+                              rounded-xl
+                              text-[11px]
+                              transition-all
+                              ${
+                                isCurrent
+                                  ? "bg-white shadow-sm"
+                                  : "hover:bg-white/60"
+                              }
+                            `}
+                          >
+                            <span
+                              className={`
+                                w-2
+                                h-2
+                                rounded-full
+                                shrink-0
+                                ${
+                                  resposta
+                                    ? ""
+                                    : "bg-slate-300"
+                                }
+                              `}
+                              style={
+                                resposta
+                                  ? {
+                                      background:
+                                        resposta.status ===
+                                        "conforme"
+                                          ? COLORS.turquoise
+                                          : resposta.status ===
+                                            "ressalva"
+                                          ? COLORS.cerulean
+                                          : COLORS.dark,
+                                    }
+                                  : undefined
+                              }
+                            />
+
+                            <span
+                              className={`
+                                truncate
+                                ${
+                                  isCurrent
+                                    ? "font-bold text-slate-800"
+                                    : "text-slate-500"
+                                }
+                              `}
+                            >
+                              {req.codigo}{" "}
+                              •{" "}
+                              {req.pergunta}
+                            </span>
+                          </button>
+                        );
+                      }
+                    )}
+                  </div>
+                )}
+              </div>
+            );
+          }
+        )}
       </div>
     </aside>
   );
 
   /* =======================================================
-     TAB BAR
+     TABS
   ======================================================= */
 
   const tabs = [
@@ -954,12 +1107,29 @@ export default function PreImplantacaoApp() {
   ];
 
   const tabBar = (
-    <nav className="border-t border-slate-200 bg-white/95 backdrop-blur-xl flex justify-around p-2">
+    <nav
+      className="
+        w-full
+        bg-white/75
+        backdrop-blur-2xl
+        border-t
+        border-white
+        shadow-[0_-10px_40px_rgba(28,133,168,0.10)]
+        flex
+        justify-around
+        px-2
+        py-2
+      "
+    >
       {tabs.map((tab) => {
+        const Icon = tab.icon;
+
         const ativo =
           view === tab.id;
 
-        const Icon = tab.icon;
+        const disabled =
+          tab.id === "vistoria" &&
+          !vistoria.vistoriador;
 
         return (
           <button
@@ -969,40 +1139,43 @@ export default function PreImplantacaoApp() {
                 tab.id
               )
             }
-            className={`
-              flex-1 py-2.5
-              flex flex-col
+            disabled={disabled}
+            className="
+              min-w-[80px]
+              py-2
+              px-3
+              rounded-2xl
+              flex
+              flex-col
               items-center
               gap-1
-              text-[10px]
-              font-black
               transition-all
-              ${
-                ativo
-                  ? "text-cyan-600"
-                  : "text-slate-400"
-              }
-            `}
+              disabled:opacity-30
+            "
+            style={
+              ativo
+                ? {
+                    background:
+                      "rgba(84,180,231,0.16)",
+                    color:
+                      COLORS.dark,
+                  }
+                : {
+                    color:
+                      "#64748b",
+                  }
+            }
           >
-            <span
-              className={`
-                p-2 rounded-xl
-                ${
-                  ativo
-                    ? "bg-cyan-50"
-                    : ""
-                }
-              `}
-            >
-              <Icon
-                size={21}
-                strokeWidth={
-                  ativo ? 2.5 : 2
-                }
-              />
-            </span>
+            <Icon
+              size={20}
+              strokeWidth={
+                ativo ? 2.7 : 2
+              }
+            />
 
-            {tab.label}
+            <span className="text-[10px] font-bold">
+              {tab.label}
+            </span>
           </button>
         );
       })}
@@ -1015,16 +1188,55 @@ export default function PreImplantacaoApp() {
 
   if (!isLoaded) {
     return (
-      <main className="min-h-screen bg-slate-950 flex items-center justify-center text-white">
+      <main
+        className="
+          min-h-screen
+          flex
+          items-center
+          justify-center
+        "
+        style={{
+          background: `
+            radial-gradient(
+              circle at 20% 10%,
+              rgba(129,205,235,0.8),
+              transparent 35%
+            ),
+            linear-gradient(
+              135deg,
+              #f4fbfd,
+              ${COLORS.ice}
+            )
+          `,
+        }}
+      >
         <div className="text-center">
-          <div className="w-12 h-12 border-2 border-cyan-400/30 border-t-cyan-400 rounded-full animate-spin mx-auto mb-4" />
+          <div
+            className="
+              w-14
+              h-14
+              rounded-2xl
+              mx-auto
+              mb-4
+              animate-pulse
+              backdrop-blur-xl
+              border
+              border-white
+              shadow-xl
+            "
+            style={{
+              background:
+                "rgba(255,255,255,0.55)",
+            }}
+          />
 
-          <p className="text-xs tracking-[0.25em] text-cyan-400 font-bold">
-            INICIALIZANDO
-          </p>
-
-          <p className="text-sm text-slate-500 mt-2">
-            Sistema de pré-implantação
+          <p
+            className="font-bold"
+            style={{
+              color: COLORS.dark,
+            }}
+          >
+            Carregando pré-implantação...
           </p>
         </div>
       </main>
@@ -1037,491 +1249,990 @@ export default function PreImplantacaoApp() {
 
   if (view === "dashboard") {
     return (
-      <main className="min-h-screen bg-slate-100 text-slate-900">
-        <div className="max-w-7xl mx-auto min-h-screen bg-white shadow-2xl flex flex-col">
-          {/* HEADER */}
+      <main
+        className="
+          min-h-screen
+          text-slate-800
+          relative
+          overflow-hidden
+        "
+        style={{
+          background: `
+            radial-gradient(
+              circle at 10% 0%,
+              rgba(154,211,225,0.90),
+              transparent 32%
+            ),
+            radial-gradient(
+              circle at 90% 20%,
+              rgba(129,205,235,0.70),
+              transparent 30%
+            ),
+            linear-gradient(
+              135deg,
+              #f7fcfd 0%,
+              #e9f7fa 45%,
+              #d9f1f5 100%
+            )
+          `,
+        }}
+      >
+        {/* elementos decorativos */}
 
-          <header className="relative overflow-hidden bg-slate-950 text-white px-6 py-8 lg:px-10">
-            <div className="absolute inset-0 bg-[radial-gradient(circle_at_80%_20%,rgba(34,211,238,0.18),transparent_30%),radial-gradient(circle_at_20%_100%,rgba(59,130,246,0.15),transparent_35%)]" />
+        <div
+          className="
+            absolute
+            -top-32
+            -right-32
+            w-96
+            h-96
+            rounded-full
+            blur-3xl
+            opacity-40
+          "
+          style={{
+            background:
+              COLORS.cerulean,
+          }}
+        />
 
-            <div className="relative">
-              <div className="flex justify-between items-start gap-4">
-                <div>
-                  <p className="text-[10px] tracking-[0.3em] font-black text-cyan-400">
-                    AUMED • AUDVISION
-                  </p>
+        <div
+          className="
+            absolute
+            -bottom-40
+            -left-40
+            w-96
+            h-96
+            rounded-full
+            blur-3xl
+            opacity-30
+          "
+          style={{
+            background:
+              COLORS.turquoise,
+          }}
+        />
 
-                  <h1 className="text-3xl lg:text-5xl font-black tracking-tight mt-2">
-                    Pré-Implantação
-                  </h1>
+        {/* Header */}
 
-                  <p className="text-sm text-slate-400 mt-2">
-                    Centro de comando da vistoria hospitalar
-                  </p>
-                </div>
+        <header
+          className="
+            relative
+            z-10
+            max-w-7xl
+            mx-auto
+            px-5
+            lg:px-8
+            pt-6
+            pb-4
+            flex
+            items-center
+            justify-between
+          "
+        >
+          <div>
+            <p
+              className="
+                text-[10px]
+                font-black
+                tracking-[0.28em]
+                uppercase
+              "
+              style={{
+                color: COLORS.dark,
+              }}
+            >
+              AUMED • ENGENHARIA CLÍNICA
+            </p>
 
-                <div className="hidden sm:flex w-14 h-14 rounded-2xl bg-cyan-400/10 border border-cyan-400/20 items-center justify-center">
-                  <ClipboardCheck
-                    className="text-cyan-400"
-                    size={28}
-                  />
-                </div>
-              </div>
-            </div>
-          </header>
+            <h1 className="text-2xl lg:text-4xl font-black tracking-tight mt-1">
+              Pré-Implantação
+            </h1>
 
-          <div className="p-6 lg:p-10 grid lg:grid-cols-5 gap-8">
-            {/* COLUNA ESQUERDA */}
+            <p className="text-sm text-slate-500 mt-1">
+              Centro de comando da vistoria
+            </p>
+          </div>
 
-            <div className="lg:col-span-2 space-y-5">
-              <div>
-                <p className="text-[10px] tracking-[0.2em] text-cyan-600 font-black mb-2">
+          <div
+            className="
+              hidden
+              sm:flex
+              items-center
+              gap-2
+              px-4
+              py-2
+              rounded-full
+              bg-white/60
+              backdrop-blur-xl
+              border
+              border-white
+              shadow-sm
+            "
+          >
+            <span
+              className="w-2 h-2 rounded-full animate-pulse"
+              style={{
+                background:
+                  COLORS.turquoise,
+              }}
+            />
+
+            <span className="text-xs font-bold text-slate-600">
+              Sistema operacional
+            </span>
+          </div>
+        </header>
+
+        <div
+          className="
+            relative
+            z-10
+            max-w-7xl
+            mx-auto
+            px-5
+            lg:px-8
+            pb-28
+          "
+        >
+          <div className="grid grid-cols-1 lg:grid-cols-5 gap-5">
+            {/* -------------------------------------------
+                CARD PRINCIPAL
+            -------------------------------------------- */}
+
+            <section
+              className="
+                lg:col-span-2
+                rounded-[2rem]
+                p-6
+                lg:p-7
+                bg-white/45
+                backdrop-blur-2xl
+                border
+                border-white/80
+                shadow-[0_20px_60px_rgba(28,133,168,0.12)]
+                relative
+                overflow-hidden
+              "
+            >
+              <div
+                className="
+                  absolute
+                  -right-20
+                  -top-20
+                  w-52
+                  h-52
+                  rounded-full
+                  blur-2xl
+                  opacity-40
+                "
+                style={{
+                  background:
+                    COLORS.sky,
+                }}
+              />
+
+              <div className="relative z-10">
+                <p
+                  className="
+                    text-xs
+                    font-black
+                    tracking-widest
+                    uppercase
+                  "
+                  style={{
+                    color: COLORS.dark,
+                  }}
+                >
                   LOCAL DA VISTORIA
                 </p>
 
                 <input
-                  className="text-2xl font-black bg-transparent outline-none w-full border-b border-slate-200 focus:border-cyan-400 pb-2"
                   value={vistoria.local}
                   onChange={(event) =>
                     setVistoria(
                       (prev) => ({
                         ...prev,
-                        local: event.target.value,
+                        local:
+                          event.target
+                            .value,
                       })
                     )
                   }
                   onBlur={() =>
                     void updateVistoriaInDb(
                       {
-                        local: vistoria.local,
+                        local:
+                          vistoria.local,
                       }
                     )
                   }
                   disabled={
                     !!activeVistoriaId
                   }
+                  className="
+                    w-full
+                    bg-transparent
+                    outline-none
+                    text-2xl
+                    lg:text-3xl
+                    font-black
+                    mt-2
+                    mb-7
+                    placeholder:text-slate-400
+                    disabled:opacity-80
+                  "
+                  placeholder="Nome do hospital"
                 />
-              </div>
 
-              {/* PROGRESSO */}
+                {/* progresso */}
 
-              <div className="bg-slate-950 text-white rounded-3xl p-6 relative overflow-hidden">
-                <div className="absolute -right-10 -top-10 w-32 h-32 rounded-full border border-cyan-400/20" />
-
-                <p className="text-[10px] tracking-[0.2em] text-cyan-400 font-black">
-                  STATUS DA VISTORIA
-                </p>
-
-                <div className="flex items-center gap-5 mt-5">
-                  <div className="relative w-24 h-24">
-                    <svg
-                      viewBox="0 0 100 100"
-                      className="w-full h-full -rotate-90"
-                    >
-                      <circle
-                        cx="50"
-                        cy="50"
-                        r="42"
-                        fill="none"
-                        stroke="rgba(255,255,255,0.08)"
-                        strokeWidth="8"
-                      />
-
-                      <circle
-                        cx="50"
-                        cy="50"
-                        r="42"
-                        fill="none"
-                        stroke="#22d3ee"
-                        strokeWidth="8"
-                        strokeLinecap="round"
-                        strokeDasharray="264"
-                        strokeDashoffset={
-                          264 -
-                          (264 *
-                            progressoTotal) /
-                            100
-                        }
-                      />
-                    </svg>
-
-                    <span className="absolute inset-0 flex items-center justify-center font-black text-xl">
-                      {progressoTotal}%
-                    </span>
-                  </div>
-
-                  <div>
-                    <p className="font-bold">
-                      {totalAvaliados} de{" "}
-                      {checklist.length}
-                    </p>
-
-                    <p className="text-xs text-slate-400 mt-1">
-                      itens avaliados
-                    </p>
-                  </div>
-                </div>
-              </div>
-
-              {/* VISTORIADOR */}
-
-              <div className="bg-white rounded-3xl border border-slate-200 p-5 shadow-sm">
-                <div className="flex items-center justify-between mb-4">
-                  <label className="text-xs font-black tracking-wider text-slate-500 flex items-center gap-2">
-                    <Users size={16} />
-                    VISTORIADOR
-                  </label>
-
-                  <button
-                    onClick={() =>
-                      setModalAberto(
-                        "novo_usuario"
-                      )
-                    }
-                    className="p-2 rounded-xl bg-slate-100 hover:bg-cyan-50 hover:text-cyan-600 transition-colors"
-                  >
-                    <Plus size={17} />
-                  </button>
-                </div>
-
-                <div className="flex gap-2">
-                  <select
-                    className="flex-1 bg-slate-50 border border-slate-200 rounded-xl px-3 py-3 text-sm font-medium outline-none focus:border-cyan-400"
-                    value={
-                      vistoria.vistoriador?.id ||
-                      ""
-                    }
-                    onChange={(event) => {
-                      const selected =
-                        vistoriadores.find(
-                          (v) =>
-                            String(v.id) ===
-                            event.target.value
-                        );
-
-                      if (selected) {
-                        handleSetVistoriador(
-                          selected
-                        );
-                      }
-                    }}
-                  >
-                    <option value="" disabled>
-                      Selecione...
-                    </option>
-
-                    {vistoriadores.map(
-                      (v) => (
-                        <option
-                          key={v.id}
-                          value={v.id}
-                        >
-                          {v.nome} —{" "}
-                          {v.funcao}
-                        </option>
-                      )
-                    )}
-                  </select>
-                </div>
-
-                {!vistoria.vistoriador && (
-                  <p className="text-[11px] text-rose-500 mt-3 font-bold">
-                    Selecione um vistoriador para iniciar.
-                  </p>
-                )}
-              </div>
-
-              {/* MÉTRICAS */}
-
-              <div className="grid grid-cols-3 gap-3">
-                <div className="bg-emerald-50 border border-emerald-100 rounded-2xl p-4">
-                  <Check
-                    size={18}
-                    className="text-emerald-600"
-                  />
-
-                  <p className="text-2xl font-black text-emerald-700 mt-3">
-                    {contagem.conforme}
-                  </p>
-
-                  <p className="text-[10px] font-black text-emerald-700/60 uppercase">
-                    Conforme
-                  </p>
-                </div>
-
-                <div className="bg-amber-50 border border-amber-100 rounded-2xl p-4">
-                  <AlertTriangle
-                    size={18}
-                    className="text-amber-600"
-                  />
-
-                  <p className="text-2xl font-black text-amber-700 mt-3">
-                    {contagem.ressalva}
-                  </p>
-
-                  <p className="text-[10px] font-black text-amber-700/60 uppercase">
-                    Ressalva
-                  </p>
-                </div>
-
-                <div className="bg-rose-50 border border-rose-100 rounded-2xl p-4">
-                  <X
-                    size={18}
-                    className="text-rose-600"
-                  />
-
-                  <p className="text-2xl font-black text-rose-700 mt-3">
-                    {contagem.naopossui}
-                  </p>
-
-                  <p className="text-[10px] font-black text-rose-700/60 uppercase">
-                    Não possui
-                  </p>
-                </div>
-              </div>
-            </div>
-
-            {/* TÓPICOS */}
-
-            <div className="lg:col-span-3">
-              <div className="flex items-end justify-between mb-4">
-                <div>
-                  <p className="text-[10px] tracking-[0.2em] text-cyan-600 font-black">
-                    MATRIZ DE VERIFICAÇÃO
-                  </p>
-
-                  <h2 className="text-xl font-black mt-1">
-                    Progresso por tópico
-                  </h2>
-                </div>
-              </div>
-
-              <div className="space-y-3">
-                {resumoCategorias.map(
-                  ({
-                    cat,
-                    total,
-                    feitos,
-                    conforme,
-                    ressalva,
-                    naoPossui,
-                  }) => {
-                    const completo =
-                      feitos === total;
-
-                    return (
-                      <button
-                        key={cat}
-                        onClick={() =>
-                          abrirCategoria(
-                            cat
+                <div
+                  className="
+                    rounded-[1.5rem]
+                    p-5
+                    bg-white/55
+                    border
+                    border-white
+                    backdrop-blur-xl
+                  "
+                >
+                  <div className="flex items-center gap-4">
+                    <div
+                      className="
+                        relative
+                        w-20
+                        h-20
+                        rounded-full
+                        flex
+                        items-center
+                        justify-center
+                      "
+                      style={{
+                        background: `
+                          conic-gradient(
+                            ${COLORS.turquoise} ${progressoTotal}%,
+                            rgba(132,202,216,0.20) ${progressoTotal}%
                           )
-                        }
-                        disabled={
-                          !vistoria.vistoriador
-                        }
-                        className="w-full text-left bg-white border border-slate-200 rounded-2xl p-5 shadow-sm hover:shadow-lg hover:border-cyan-200 transition-all disabled:opacity-50"
+                        `,
+                      }}
+                    >
+                      <div
+                        className="
+                          absolute
+                          inset-[5px]
+                          rounded-full
+                          bg-white/85
+                          flex
+                          items-center
+                          justify-center
+                        "
                       >
-                        <div className="flex justify-between items-center mb-3">
-                          <div>
-                            <p className="font-black text-sm">
-                              {cat}
-                            </p>
+                        <span
+                          className="text-xl font-black"
+                          style={{
+                            color:
+                              COLORS.dark,
+                          }}
+                        >
+                          {progressoTotal}%
+                        </span>
+                      </div>
+                    </div>
 
-                            <p className="text-[11px] text-slate-400 mt-1">
-                              {feitos} de{" "}
-                              {total} avaliados
-                            </p>
-                          </div>
+                    <div>
+                      <p className="font-bold text-slate-700">
+                        {totalAvaliados} de{" "}
+                        {checklist.length}{" "}
+                        itens
+                      </p>
 
-                          <div
-                            className={`
-                              text-xs font-black px-3 py-1.5 rounded-full
-                              ${
-                                completo
-                                  ? "bg-emerald-50 text-emerald-600"
-                                  : "bg-slate-100 text-slate-500"
-                              }
-                            `}
+                      <p className="text-xs text-slate-500 mt-1">
+                        {totalAvaliados >
+                        0
+                          ? "Vistoria em andamento"
+                          : "Vistoria não iniciada"}
+                      </p>
+                    </div>
+                  </div>
+
+                  <div className="mt-5 h-2 rounded-full bg-slate-200/70 overflow-hidden">
+                    <div
+                      className="h-full rounded-full transition-all duration-700"
+                      style={{
+                        width: `${progressoTotal}%`,
+                        background: `
+                          linear-gradient(
+                            90deg,
+                            ${COLORS.cerulean},
+                            ${COLORS.turquoise}
+                          )
+                        `,
+                      }}
+                    />
+                  </div>
+                </div>
+
+                {/* VISTORIADOR */}
+
+                <div className="mt-5">
+                  <div className="flex items-center justify-between mb-2">
+                    <label
+                      className="
+                        text-xs
+                        font-black
+                        uppercase
+                        tracking-wider
+                        flex
+                        items-center
+                        gap-2
+                      "
+                      style={{
+                        color:
+                          COLORS.dark,
+                      }}
+                    >
+                      <Users size={15} />
+                      Vistoriador responsável
+                    </label>
+
+                    <button
+                      onClick={() =>
+                        setModalAberto(
+                          "novo_usuario"
+                        )
+                      }
+                      className="
+                        text-[10px]
+                        font-black
+                        flex
+                        items-center
+                        gap-1
+                        px-3
+                        py-1.5
+                        rounded-full
+                        bg-white/80
+                        border
+                        border-white
+                        hover:scale-105
+                        transition-transform
+                      "
+                      style={{
+                        color:
+                          COLORS.dark,
+                      }}
+                    >
+                      <Plus size={13} />
+                      NOVO
+                    </button>
+                  </div>
+
+                  <div
+                    className="
+                      flex
+                      gap-2
+                      bg-white/60
+                      rounded-2xl
+                      p-2
+                      border
+                      border-white
+                    "
+                  >
+                    <select
+                      className="
+                        flex-1
+                        min-w-0
+                        bg-transparent
+                        outline-none
+                        px-2
+                        py-2
+                        text-sm
+                        font-semibold
+                        text-slate-700
+                      "
+                      value={
+                        vistoria.vistoriador
+                          ?.id ?? ""
+                      }
+                      onChange={(event) => {
+                        const id =
+                          Number(
+                            event.target
+                              .value
+                          );
+
+                        const selecionado =
+                          vistoriadores.find(
+                            (v) =>
+                              Number(
+                                v.id
+                              ) === id
+                          );
+
+                        if (
+                          selecionado
+                        ) {
+                          handleSetVistoriador(
+                            selecionado
+                          );
+                        }
+                      }}
+                    >
+                      <option value="">
+                        Selecione...
+                      </option>
+
+                      {vistoriadores.map(
+                        (v) => (
+                          <option
+                            key={v.id}
+                            value={v.id}
                           >
-                            {feitos}/
-                            {total}
-                          </div>
-                        </div>
+                            {v.nome} (
+                            {v.funcao})
+                          </option>
+                        )
+                      )}
+                    </select>
 
-                        <div className="h-2 bg-slate-100 rounded-full overflow-hidden flex">
-                          <div
-                            className="bg-emerald-400"
-                            style={{
-                              width: `${
-                                (conforme /
-                                  total) *
-                                100
-                              }%`,
-                            }}
-                          />
+                    <button
+                      onClick={() =>
+                        setModalAberto(
+                          "novo_usuario"
+                        )
+                      }
+                      className="
+                        w-11
+                        h-11
+                        rounded-xl
+                        flex
+                        items-center
+                        justify-center
+                        text-white
+                        shadow-lg
+                        hover:scale-105
+                        active:scale-95
+                        transition-transform
+                      "
+                      style={{
+                        background:
+                          `linear-gradient(135deg, ${COLORS.cerulean}, ${COLORS.petrol})`,
+                      }}
+                      title="Novo vistoriador"
+                    >
+                      <UserPlus
+                        size={19}
+                      />
+                    </button>
+                  </div>
 
-                          <div
-                            className="bg-amber-400"
-                            style={{
-                              width: `${
-                                (ressalva /
-                                  total) *
-                                100
-                              }%`,
-                            }}
-                          />
-
-                          <div
-                            className="bg-rose-400"
-                            style={{
-                              width: `${
-                                (naoPossui /
-                                  total) *
-                                100
-                              }%`,
-                            }}
-                          />
-                        </div>
-
-                        <div className="flex justify-between mt-4">
-                          <div className="flex gap-4 text-[10px] font-bold">
-                            {ressalva > 0 && (
-                              <span className="text-amber-600">
-                                {ressalva} ressalva
-                                {ressalva >
-                                1
-                                  ? "s"
-                                  : ""}
-                              </span>
-                            )}
-
-                            {naoPossui >
-                              0 && (
-                              <span className="text-rose-600">
-                                {naoPossui} não possui
-                              </span>
-                            )}
-                          </div>
-
-                          <ChevronRight
-                            size={18}
-                            className="text-slate-300"
-                          />
-                        </div>
-                      </button>
-                    );
-                  }
-                )}
+                  {!vistoria.vistoriador && (
+                    <p className="text-[11px] text-amber-700 mt-2">
+                      Selecione um vistoriador
+                      para iniciar.
+                    </p>
+                  )}
+                </div>
               </div>
-            </div>
+            </section>
+
+            {/* -------------------------------------------
+                MÉTRICAS
+            -------------------------------------------- */}
+
+            <section className="lg:col-span-3 grid grid-cols-3 gap-3">
+              {[
+                {
+                  label: "Conformes",
+                  value:
+                    contagem.conforme,
+                  color:
+                    COLORS.turquoise,
+                  icon: Check,
+                },
+                {
+                  label: "Ressalvas",
+                  value:
+                    contagem.ressalva,
+                  color:
+                    COLORS.cerulean,
+                  icon: AlertTriangle,
+                },
+                {
+                  label: "Não possui",
+                  value:
+                    contagem.naopossui,
+                  color:
+                    COLORS.dark,
+                  icon: X,
+                },
+              ].map((metric) => {
+                const Icon =
+                  metric.icon;
+
+                return (
+                  <div
+                    key={metric.label}
+                    className="
+                      rounded-[1.5rem]
+                      p-4
+                      bg-white/50
+                      backdrop-blur-2xl
+                      border
+                      border-white/80
+                      shadow-[0_15px_40px_rgba(28,133,168,0.08)]
+                      flex
+                      flex-col
+                      justify-between
+                      min-h-[130px]
+                    "
+                  >
+                    <div
+                      className="
+                        w-9
+                        h-9
+                        rounded-xl
+                        flex
+                        items-center
+                        justify-center
+                      "
+                      style={{
+                        background:
+                          `${metric.color}22`,
+                        color:
+                          metric.color,
+                      }}
+                    >
+                      <Icon
+                        size={17}
+                      />
+                    </div>
+
+                    <div>
+                      <span
+                        className="block text-3xl font-black"
+                        style={{
+                          color:
+                            metric.color,
+                        }}
+                      >
+                        {metric.value}
+                      </span>
+
+                      <span className="text-[10px] font-black uppercase tracking-wider text-slate-500">
+                        {metric.label}
+                      </span>
+                    </div>
+                  </div>
+                );
+              })}
+
+              {/* -----------------------------------------
+                  PROGRESSO POR TÓPICO
+              ------------------------------------------ */}
+
+              <div
+                className="
+                  col-span-3
+                  rounded-[2rem]
+                  p-5
+                  bg-white/45
+                  backdrop-blur-2xl
+                  border
+                  border-white/80
+                  shadow-[0_20px_60px_rgba(28,133,168,0.10)]
+                "
+              >
+                <div className="flex items-center justify-between mb-4">
+                  <div>
+                    <p
+                      className="text-[10px] font-black tracking-[0.2em] uppercase"
+                      style={{
+                        color:
+                          COLORS.dark,
+                      }}
+                    >
+                      CHECKLIST
+                    </p>
+
+                    <h2 className="text-lg font-black text-slate-700">
+                      Progresso por tópico
+                    </h2>
+                  </div>
+
+                  <BarChart3
+                    size={22}
+                    style={{
+                      color:
+                        COLORS.petrol,
+                    }}
+                  />
+                </div>
+
+                <div className="space-y-2">
+                  {resumoCategorias.map(
+                    (item) => {
+                      const completo =
+                        item.feitos ===
+                        item.total;
+
+                      return (
+                        <button
+                          key={item.cat}
+                          onClick={() =>
+                            abrirCategoria(
+                              item.cat
+                            )
+                          }
+                          disabled={
+                            !vistoria.vistoriador
+                          }
+                          className="
+                            w-full
+                            p-4
+                            rounded-2xl
+                            bg-white/50
+                            hover:bg-white/80
+                            border
+                            border-white/70
+                            text-left
+                            transition-all
+                            disabled:opacity-40
+                            hover:shadow-sm
+                            group
+                          "
+                        >
+                          <div className="flex items-center gap-3">
+                            <div className="flex-1 min-w-0">
+                              <div className="flex justify-between items-center gap-3">
+                                <span className="font-bold text-sm text-slate-700 truncate">
+                                  {item.cat}
+                                </span>
+
+                                <span
+                                  className="text-xs font-black"
+                                  style={{
+                                    color:
+                                      completo
+                                        ? COLORS.turquoise
+                                        : COLORS.dark,
+                                  }}
+                                >
+                                  {
+                                    item.feitos
+                                  }
+                                  /
+                                  {
+                                    item.total
+                                  }
+                                </span>
+                              </div>
+
+                              <div className="mt-2 h-2 rounded-full bg-slate-200/70 overflow-hidden flex">
+                                <div
+                                  style={{
+                                    width: `${
+                                      (item.conforme /
+                                        item.total) *
+                                      100
+                                    }%`,
+                                    background:
+                                      COLORS.turquoise,
+                                  }}
+                                />
+
+                                <div
+                                  style={{
+                                    width: `${
+                                      (item.ressalva /
+                                        item.total) *
+                                      100
+                                    }%`,
+                                    background:
+                                      COLORS.cerulean,
+                                  }}
+                                />
+
+                                <div
+                                  style={{
+                                    width: `${
+                                      (item.naoPossui /
+                                        item.total) *
+                                      100
+                                    }%`,
+                                    background:
+                                      COLORS.dark,
+                                  }}
+                                />
+                              </div>
+                            </div>
+
+                            <ChevronRight
+                              size={18}
+                              className="text-slate-300 group-hover:translate-x-1 transition-transform"
+                            />
+                          </div>
+                        </button>
+                      );
+                    }
+                  )}
+                </div>
+              </div>
+            </section>
           </div>
 
           {/* CTA */}
 
-          <div className="p-6 lg:p-10 pt-0">
-            <button
-              onClick={() =>
-                void handleStartVistoria()
-              }
-              disabled={
-                !vistoria.vistoriador
-              }
-              className="w-full rounded-2xl bg-slate-950 text-white py-5 font-black flex items-center justify-center gap-3 hover:bg-slate-900 disabled:opacity-40 transition-all shadow-xl"
-            >
-              <ClipboardCheck
-                size={22}
-              />
+          <button
+            onClick={() =>
+              void handleStartVistoria()
+            }
+            disabled={
+              !vistoria.vistoriador ||
+              isSaving
+            }
+            className="
+              mt-5
+              w-full
+              lg:w-auto
+              lg:min-w-[360px]
+              lg:mx-auto
+              py-4
+              px-8
+              rounded-2xl
+              text-white
+              font-black
+              tracking-wide
+              flex
+              items-center
+              justify-center
+              gap-3
+              shadow-[0_15px_35px_rgba(64,171,201,0.30)]
+              hover:-translate-y-1
+              active:translate-y-0
+              transition-all
+              disabled:opacity-40
+            "
+            style={{
+              background: `
+                linear-gradient(
+                  135deg,
+                  ${COLORS.cerulean},
+                  ${COLORS.petrol}
+                )
+              `,
+            }}
+          >
+            <ClipboardCheck
+              size={23}
+            />
 
-              {totalAvaliados > 0
-                ? "CONTINUAR VISTORIA"
-                : "INICIAR VISTORIA"}
+            {isSaving
+              ? "PREPARANDO..."
+              : totalAvaliados > 0
+              ? "CONTINUAR VISTORIA"
+              : "INICIAR VISTORIA"}
 
-              <ArrowRight
-                size={20}
-              />
-            </button>
-          </div>
-
-          <div className="lg:hidden">
-            {tabBar}
-          </div>
+            <ArrowRight size={20} />
+          </button>
         </div>
 
-        {/* MODAL NOVO VISTORIADOR */}
+        {/* Mobile nav */}
+
+        <div className="fixed bottom-0 left-0 right-0 z-40 lg:hidden">
+          {tabBar}
+        </div>
+
+        {/* NOVO VISTORIADOR */}
 
         {modalAberto ===
           "novo_usuario" && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+          <div className="fixed inset-0 z-[100] flex items-center justify-center p-4">
             <div
-              className="absolute inset-0 bg-slate-950/60 backdrop-blur-sm"
+              className="
+                absolute
+                inset-0
+                bg-slate-900/20
+                backdrop-blur-md
+              "
               onClick={() =>
                 setModalAberto(null)
               }
             />
 
-            <div className="relative bg-white rounded-3xl p-6 w-full max-w-md shadow-2xl">
-              <div className="flex items-center gap-3 mb-6">
-                <div className="p-3 rounded-2xl bg-cyan-50 text-cyan-600">
-                  <UserPlus size={22} />
+            <div
+              className="
+                relative
+                z-10
+                w-full
+                max-w-md
+                rounded-[2rem]
+                p-6
+                bg-white/80
+                backdrop-blur-2xl
+                border
+                border-white
+                shadow-[0_30px_80px_rgba(28,133,168,0.25)]
+              "
+            >
+              <div className="flex items-center justify-between mb-6">
+                <div className="flex items-center gap-3">
+                  <div
+                    className="
+                      w-11
+                      h-11
+                      rounded-2xl
+                      flex
+                      items-center
+                      justify-center
+                    "
+                    style={{
+                      background:
+                        "rgba(84,180,231,0.16)",
+                      color:
+                        COLORS.dark,
+                    }}
+                  >
+                    <UserPlus
+                      size={21}
+                    />
+                  </div>
+
+                  <div>
+                    <p
+                      className="text-[10px] font-black tracking-widest"
+                      style={{
+                        color:
+                          COLORS.dark,
+                      }}
+                    >
+                      CADASTRO
+                    </p>
+
+                    <h3 className="text-lg font-black text-slate-700">
+                      Novo Vistoriador
+                    </h3>
+                  </div>
+                </div>
+
+                <button
+                  onClick={() =>
+                    setModalAberto(
+                      null
+                    )
+                  }
+                  className="
+                    w-9
+                    h-9
+                    rounded-full
+                    bg-white
+                    border
+                    border-slate-100
+                    flex
+                    items-center
+                    justify-center
+                    text-slate-400
+                    hover:text-slate-700
+                  "
+                >
+                  <X size={18} />
+                </button>
+              </div>
+
+              <div className="space-y-4">
+                <div>
+                  <label className="text-xs font-bold text-slate-500 mb-1.5 block">
+                    Nome completo
+                  </label>
+
+                  <input
+                    autoFocus
+                    value={
+                      novoVistoriador.nome
+                    }
+                    onChange={(event) =>
+                      setNovoVistoriador(
+                        (prev) => ({
+                          ...prev,
+                          nome:
+                            event.target
+                              .value,
+                        })
+                      )
+                    }
+                    placeholder="Ex.: João da Silva"
+                    className="
+                      w-full
+                      px-4
+                      py-3.5
+                      rounded-xl
+                      bg-white/70
+                      border
+                      border-slate-200
+                      outline-none
+                      text-slate-700
+                      focus:ring-2
+                    "
+                    style={{
+                      outlineColor:
+                        COLORS.sky,
+                    }}
+                  />
                 </div>
 
                 <div>
-                  <h3 className="font-black text-lg">
-                    Novo vistoriador
-                  </h3>
+                  <label className="text-xs font-bold text-slate-500 mb-1.5 block">
+                    Função
+                  </label>
 
-                  <p className="text-xs text-slate-400">
-                    Cadastre um responsável pela vistoria.
-                  </p>
+                  <input
+                    value={
+                      novoVistoriador.funcao
+                    }
+                    onChange={(event) =>
+                      setNovoVistoriador(
+                        (prev) => ({
+                          ...prev,
+                          funcao:
+                            event.target
+                              .value,
+                        })
+                      )
+                    }
+                    placeholder="Ex.: Engenheiro Clínico"
+                    className="
+                      w-full
+                      px-4
+                      py-3.5
+                      rounded-xl
+                      bg-white/70
+                      border
+                      border-slate-200
+                      outline-none
+                      text-slate-700
+                    "
+                  />
                 </div>
-              </div>
-
-              <div className="space-y-3">
-                <input
-                  type="text"
-                  autoFocus
-                  placeholder="Nome completo"
-                  value={
-                    novoVistoriador.nome
-                  }
-                  onChange={(event) =>
-                    setNovoVistoriador(
-                      (prev) => ({
-                        ...prev,
-                        nome: event.target.value,
-                      })
-                    )
-                  }
-                  className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 outline-none focus:border-cyan-400"
-                />
-
-                <input
-                  type="text"
-                  placeholder="Função"
-                  value={
-                    novoVistoriador.funcao
-                  }
-                  onChange={(event) =>
-                    setNovoVistoriador(
-                      (prev) => ({
-                        ...prev,
-                        funcao: event.target.value,
-                      })
-                    )
-                  }
-                  className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 outline-none focus:border-cyan-400"
-                />
               </div>
 
               <div className="flex gap-3 mt-6">
                 <button
                   onClick={() =>
-                    setModalAberto(null)
+                    setModalAberto(
+                      null
+                    )
                   }
-                  className="flex-1 py-3 rounded-xl bg-slate-100 font-bold"
+                  className="
+                    flex-1
+                    py-3.5
+                    rounded-xl
+                    font-bold
+                    text-slate-500
+                    bg-slate-100
+                    hover:bg-slate-200
+                  "
                 >
-                  Cancelar
+                  CANCELAR
                 </button>
 
                 <button
@@ -1530,11 +2241,32 @@ export default function PreImplantacaoApp() {
                   }
                   disabled={
                     !novoVistoriador.nome.trim() ||
-                    !novoVistoriador.funcao.trim()
+                    !novoVistoriador.funcao.trim() ||
+                    isSaving
                   }
-                  className="flex-[2] py-3 rounded-xl bg-slate-950 text-white font-bold disabled:opacity-40"
+                  className="
+                    flex-[1.7]
+                    py-3.5
+                    rounded-xl
+                    font-black
+                    text-white
+                    disabled:opacity-40
+                    transition-all
+                    shadow-lg
+                  "
+                  style={{
+                    background: `
+                      linear-gradient(
+                        135deg,
+                        ${COLORS.cerulean},
+                        ${COLORS.petrol}
+                      )
+                    `,
+                  }}
                 >
-                  Salvar e usar
+                  {isSaving
+                    ? "SALVANDO..."
+                    : "SALVAR E USAR"}
                 </button>
               </div>
             </div>
@@ -1549,28 +2281,6 @@ export default function PreImplantacaoApp() {
   ======================================================= */
 
   if (view === "relatorio") {
-    const filtros: {
-      id: FiltroRelatorio;
-      label: string;
-    }[] = [
-      {
-        id: "todos",
-        label: `Todos (${todasAsRespostas.length})`,
-      },
-      {
-        id: "conforme",
-        label: `Conformes (${contagem.conforme})`,
-      },
-      {
-        id: "ressalva",
-        label: `Ressalvas (${contagem.ressalva})`,
-      },
-      {
-        id: "nao_possui",
-        label: `Não Possui (${contagem.naopossui})`,
-      },
-    ];
-
     const respostasFiltradas =
       todasAsRespostas.filter(
         (resposta) =>
@@ -1580,43 +2290,112 @@ export default function PreImplantacaoApp() {
             filtroRelatorio
       );
 
-    const statusColors: Record<
-      string,
-      string
-    > = {
-      conforme:
-        "border-emerald-400",
-      ressalva:
-        "border-amber-400",
-      nao_possui:
-        "border-rose-400",
-    };
+    const filtros = [
+      {
+        id: "todos" as FiltroRelatorio,
+        label: `Todos (${todasAsRespostas.length})`,
+        color: COLORS.dark,
+      },
+      {
+        id: "conforme" as FiltroRelatorio,
+        label: `Conformes (${contagem.conforme})`,
+        color: COLORS.turquoise,
+      },
+      {
+        id: "ressalva" as FiltroRelatorio,
+        label: `Ressalvas (${contagem.ressalva})`,
+        color: COLORS.cerulean,
+      },
+      {
+        id: "nao_possui" as FiltroRelatorio,
+        label: `Não Possui (${contagem.naopossui})`,
+        color: COLORS.dark,
+      },
+    ];
 
     return (
-      <main className="min-h-screen bg-slate-100">
-        <div className="max-w-4xl mx-auto min-h-screen bg-white shadow-2xl flex flex-col">
-          <header className="p-5 border-b border-slate-100 sticky top-0 bg-white/95 backdrop-blur-xl z-20">
-            <div className="flex items-center gap-3 mb-4">
+      <main
+        className="
+          min-h-screen
+          relative
+          overflow-hidden
+        "
+        style={{
+          background: `
+            radial-gradient(
+              circle at 15% 0%,
+              rgba(154,211,225,0.7),
+              transparent 30%
+            ),
+            linear-gradient(
+              135deg,
+              #f7fcfd,
+              #e3f5f8
+            )
+          `,
+        }}
+      >
+        <div className="max-w-5xl mx-auto min-h-screen flex flex-col">
+          {/* HEADER */}
+
+          <header
+            className="
+              sticky
+              top-0
+              z-20
+              p-5
+              bg-white/65
+              backdrop-blur-2xl
+              border-b
+              border-white
+            "
+          >
+            <div className="flex items-center gap-3">
               <button
                 onClick={() =>
                   setView("dashboard")
                 }
-                className="p-2 rounded-xl bg-slate-100"
+                className="
+                  w-10
+                  h-10
+                  rounded-xl
+                  bg-white/80
+                  border
+                  border-white
+                  flex
+                  items-center
+                  justify-center
+                  shadow-sm
+                  hover:scale-105
+                  transition-transform
+                "
+                style={{
+                  color: COLORS.dark,
+                }}
               >
-                <ArrowLeft size={18} />
+                <ArrowLeft
+                  size={19}
+                />
               </button>
 
-              <div>
-                <p className="text-[10px] text-cyan-600 font-black tracking-widest">
-                  AUDITORIA
+              <div className="flex-1">
+                <p
+                  className="text-[10px] font-black tracking-[0.2em]"
+                  style={{
+                    color:
+                      COLORS.dark,
+                  }}
+                >
+                  AUMED • PRÉ-IMPLANTAÇÃO
                 </p>
 
-                <h1 className="text-xl font-black">
+                <h1 className="text-xl font-black text-slate-700">
                   Relatório da Vistoria
                 </h1>
 
-                <p className="text-xs text-slate-400">
+                <p className="text-xs text-slate-500">
                   {vistoria.local}
+
                   {vistoria.vistoriador
                     ? ` • ${vistoria.vistoriador.nome}`
                     : ""}
@@ -1624,80 +2403,148 @@ export default function PreImplantacaoApp() {
               </div>
             </div>
 
-            <div className="flex gap-2 overflow-x-auto">
+            {/* filtros */}
+
+            <div className="flex gap-2 overflow-x-auto mt-4 pb-1">
               {filtros.map(
-                (filtro) => (
-                  <button
-                    key={filtro.id}
-                    onClick={() =>
-                      setFiltroRelatorio(
+                (filtro) => {
+                  const ativo =
+                    filtroRelatorio ===
+                    filtro.id;
+
+                  return (
+                    <button
+                      key={
                         filtro.id
-                      )
-                    }
-                    className={`
-                      shrink-0
-                      px-4 py-2
-                      rounded-full
-                      text-xs
-                      font-black
-                      transition-all
-                      ${
-                        filtroRelatorio ===
-                        filtro.id
-                          ? "bg-slate-950 text-white"
-                          : "bg-slate-100 text-slate-500"
                       }
-                    `}
-                  >
-                    {filtro.label}
-                  </button>
-                )
+                      onClick={() =>
+                        setFiltroRelatorio(
+                          filtro.id
+                        )
+                      }
+                      className="
+                        shrink-0
+                        px-4
+                        py-2
+                        rounded-full
+                        text-xs
+                        font-black
+                        transition-all
+                      "
+                      style={
+                        ativo
+                          ? {
+                              background:
+                                filtro.color,
+                              color:
+                                "#fff",
+                              boxShadow:
+                                `0 8px 20px ${filtro.color}33`,
+                            }
+                          : {
+                              background:
+                                "rgba(255,255,255,0.65)",
+                              color:
+                                "#64748b",
+                            }
+                      }
+                    >
+                      {filtro.label}
+                    </button>
+                  );
+                }
               )}
             </div>
           </header>
 
-          <div className="p-5 flex-1 overflow-y-auto bg-slate-50">
+          {/* CONTEÚDO */}
+
+          <div className="flex-1 p-5 pb-24">
             {respostasFiltradas.length ===
             0 ? (
-              <div className="text-center py-20">
+              <div
+                className="
+                  mt-10
+                  rounded-[2rem]
+                  p-10
+                  text-center
+                  bg-white/55
+                  backdrop-blur-xl
+                  border
+                  border-white
+                "
+              >
                 <ClipboardCheck
                   size={40}
-                  className="mx-auto text-slate-300"
+                  className="mx-auto mb-4 opacity-40"
+                  style={{
+                    color:
+                      COLORS.dark,
+                  }}
                 />
 
-                <p className="text-sm font-bold text-slate-500 mt-4">
+                <p className="font-bold text-slate-600">
                   Nenhum item encontrado.
+                </p>
+
+                <p className="text-xs text-slate-400 mt-1">
+                  Inicie a vistoria para
+                  gerar o relatório.
                 </p>
               </div>
             ) : (
               <div className="space-y-6">
                 {categorias.map(
-                  (cat) => {
+                  (categoria) => {
                     const itens =
                       checklist.filter(
                         (req) =>
                           req.categoria ===
-                            cat &&
+                            categoria &&
                           respostasFiltradas.some(
-                            (resposta) =>
-                              resposta.requisitoId ===
+                            (r) =>
+                              r.requisitoId ===
                               req.id
                           )
                       );
 
                     if (
-                      itens.length === 0
+                      itens.length ===
+                      0
                     ) {
                       return null;
                     }
 
                     return (
                       <section
-                        key={cat}
+                        key={
+                          categoria
+                        }
                       >
-                        <h3 className="text-xs font-black uppercase tracking-widest text-slate-400 mb-3">
-                          {cat}
-                        </h3>
+                        <div className="flex items-center gap-3 mb-3">
+                          <div
+                            className="w-2 h-2 rounded-full"
+                            style={{
+                              background:
+                                COLORS.turquoise,
+                            }}
+                          />
+
+                          <h3
+                            className="
+                              text-xs
+                              font-black
+                              uppercase
+                              tracking-[0.18em]
+                            "
+                            style={{
+                              color:
+                                COLORS.dark,
+                            }}
+                          >
+                            {categoria}
+                          </h3>
+                        </div>
 
                         <div className="space-y-3">
                           {itens.map(
@@ -1708,48 +2555,92 @@ export default function PreImplantacaoApp() {
                                   req.id
                                 ];
 
+                              if (
+                                !resposta
+                              ) {
+                                return null;
+                              }
+
+                              const statusColor =
+                                resposta.status ===
+                                "conforme"
+                                  ? COLORS.turquoise
+                                  : resposta.status ===
+                                    "ressalva"
+                                  ? COLORS.cerulean
+                                  : COLORS.dark;
+
                               return (
-                                <div
+                                <article
                                   key={
                                     req.id
                                   }
-                                  className={`
-                                    bg-white
+                                  className="
+                                    rounded-[1.5rem]
                                     p-5
-                                    rounded-2xl
+                                    bg-white/60
+                                    backdrop-blur-xl
                                     border
-                                    border-l-4
+                                    border-white
                                     shadow-sm
-                                    ${
-                                      statusColors[
-                                        resposta.status
-                                      ] ||
-                                      "border-slate-200"
-                                    }
-                                  `}
+                                    relative
+                                    overflow-hidden
+                                  "
                                 >
-                                  <div className="flex justify-between gap-3 mb-3">
-                                    <span className="text-[10px] font-black bg-slate-100 px-2 py-1 rounded-lg">
+                                  <div
+                                    className="absolute left-0 top-0 bottom-0 w-1"
+                                    style={{
+                                      background:
+                                        statusColor,
+                                    }}
+                                  />
+
+                                  <div className="flex justify-between gap-3">
+                                    <span
+                                      className="
+                                        text-[10px]
+                                        font-black
+                                        px-2
+                                        py-1
+                                        rounded-lg
+                                      "
+                                      style={{
+                                        color:
+                                          COLORS.dark,
+                                        background:
+                                          "rgba(154,211,225,0.25)",
+                                      }}
+                                    >
                                       {
                                         req.codigo
                                       }
                                     </span>
 
-                                    <span className="text-[10px] font-bold uppercase text-slate-400">
+                                    <span
+                                      className="
+                                        text-[10px]
+                                        font-black
+                                        uppercase
+                                      "
+                                      style={{
+                                        color:
+                                          statusColor,
+                                      }}
+                                    >
                                       {
-                                        req.criticidade
+                                        resposta.status
                                       }
                                     </span>
                                   </div>
 
-                                  <p className="font-bold text-slate-800">
+                                  <h4 className="font-bold text-slate-700 mt-3">
                                     {
                                       req.pergunta
                                     }
-                                  </p>
+                                  </h4>
 
                                   {resposta.observacao && (
-                                    <div className="mt-3 p-4 bg-slate-50 rounded-xl">
+                                    <div className="mt-3 p-3 rounded-xl bg-slate-50/80 border border-slate-100">
                                       <p className="text-sm text-slate-600 italic">
                                         “
                                         {
@@ -1760,40 +2651,53 @@ export default function PreImplantacaoApp() {
                                     </div>
                                   )}
 
-                                  {resposta.fotos.length >
-                                    0 && (
-                                    <div className="mt-4 flex gap-2 flex-wrap">
-                                      {resposta.fotos.map(
-                                        (
-                                          foto,
-                                          index
-                                        ) => (
-                                          <a
-                                            key={
-                                              index
-                                            }
-                                            href={
-                                              foto
-                                            }
-                                            target="_blank"
-                                            rel="noopener noreferrer"
-                                          >
-                                            <img
-                                              src={
+                                  {resposta.fotos &&
+                                    resposta
+                                      .fotos
+                                      .length >
+                                      0 && (
+                                      <div className="mt-4 flex gap-2 flex-wrap">
+                                        {resposta.fotos.map(
+                                          (
+                                            foto,
+                                            index
+                                          ) => (
+                                            <a
+                                              key={
+                                                index
+                                              }
+                                              href={
                                                 foto
                                               }
-                                              alt={`Evidência ${
-                                                index +
-                                                1
-                                              }`}
-                                              className="w-20 h-20 rounded-xl object-cover border border-slate-200"
-                                            />
-                                          </a>
-                                        )
-                                      )}
-                                    </div>
-                                  )}
-                                </div>
+                                              target="_blank"
+                                              rel="noopener noreferrer"
+                                            >
+                                              <img
+                                                src={
+                                                  foto
+                                                }
+                                                alt={`Evidência ${
+                                                  index +
+                                                  1
+                                                }`}
+                                                className="
+                                                  w-20
+                                                  h-20
+                                                  rounded-xl
+                                                  object-cover
+                                                  border
+                                                  border-white
+                                                  shadow-sm
+                                                  hover:scale-105
+                                                  transition-transform
+                                                "
+                                              />
+                                            </a>
+                                          )
+                                        )}
+                                      </div>
+                                    )}
+                                </article>
                               );
                             }
                           )}
@@ -1806,7 +2710,7 @@ export default function PreImplantacaoApp() {
             )}
           </div>
 
-          <div className="lg:hidden">
+          <div className="fixed bottom-0 left-0 right-0 z-40 lg:hidden">
             {tabBar}
           </div>
         </div>
@@ -1818,19 +2722,11 @@ export default function PreImplantacaoApp() {
      VISTORIA
   ======================================================= */
 
+  const requisitoAtual =
+    checklist[currentIndex];
+
   if (!requisitoAtual) {
-    return (
-      <main className="min-h-screen bg-slate-950 text-white flex items-center justify-center">
-        <button
-          onClick={() =>
-            setView("dashboard")
-          }
-          className="px-6 py-3 bg-cyan-500 rounded-xl font-bold"
-        >
-          Voltar ao início
-        </button>
-      </main>
-    );
+    return null;
   }
 
   const respostaAtual =
@@ -1838,529 +2734,966 @@ export default function PreImplantacaoApp() {
       requisitoAtual.id
     ];
 
-  const progressoItem =
-    ((currentIndex + 1) /
-      checklist.length) *
-    100;
+  const progressoVistoria =
+    checklist.length > 0
+      ? Math.round(
+          ((currentIndex + 1) /
+            checklist.length) *
+            100
+        )
+      : 0;
 
   /* =======================================================
-     INTERFACE FUTURISTA DA VISTORIA
+     TELA VISTORIA
   ======================================================= */
 
   return (
-    <main className="min-h-screen bg-[#050b14] text-white overflow-hidden">
-      <div className="min-h-screen relative flex">
-        {/* GLOW DE FUNDO */}
+    <main
+      className="
+        min-h-screen
+        relative
+        overflow-hidden
+        text-slate-800
+      "
+      style={{
+        background: `
+          radial-gradient(
+            circle at 0% 0%,
+            rgba(154,211,225,0.85),
+            transparent 30%
+          ),
+          radial-gradient(
+            circle at 100% 20%,
+            rgba(129,205,235,0.65),
+            transparent 30%
+          ),
+          linear-gradient(
+            135deg,
+            #f8fdfe 0%,
+            #e7f6f9 50%,
+            #d7f0f4 100%
+          )
+        `,
+      }}
+    >
+      {/* -----------------------------------------------
+          DESKTOP LAYOUT
+      ------------------------------------------------ */}
 
-        <div className="pointer-events-none absolute inset-0 overflow-hidden">
-          <div className="absolute w-[500px] h-[500px] rounded-full bg-cyan-500/10 blur-[120px] -top-40 -right-40" />
+      <div className="min-h-screen flex">
+        {/* SIDEBAR */}
 
-          <div className="absolute w-[400px] h-[400px] rounded-full bg-blue-600/10 blur-[120px] bottom-0 left-1/3" />
-
-          <div className="absolute inset-0 bg-[linear-gradient(rgba(255,255,255,0.018)_1px,transparent_1px),linear-gradient(90deg,rgba(255,255,255,0.018)_1px,transparent_1px)] bg-[size:40px_40px]" />
-        </div>
-
-        {/* SIDEBAR DESKTOP */}
-
-        <div className="hidden lg:block relative z-30 w-[330px] shrink-0">
+        <div className="hidden lg:block shrink-0">
           {topicListNav}
         </div>
 
-        {/* SIDEBAR MOBILE */}
+        {/* CONTEÚDO */}
 
-        {isMenuOpen && (
-          <div className="fixed inset-0 z-50 lg:hidden">
-            <div
-              className="absolute inset-0 bg-black/70 backdrop-blur-sm"
-              onClick={() =>
-                setIsMenuOpen(false)
-              }
-            />
+        <div className="flex-1 min-w-0 flex flex-col">
+          {/* ---------------------------------------------
+              HEADER
+          ---------------------------------------------- */}
 
-            <div className="relative w-[88%] max-w-[360px] h-full">
-              {topicListNav}
-            </div>
-          </div>
-        )}
+          <header
+            className="
+              sticky
+              top-0
+              z-30
+              bg-white/55
+              backdrop-blur-2xl
+              border-b
+              border-white
+              px-4
+              lg:px-7
+              py-3
+            "
+          >
+            <div className="flex items-center gap-3">
+              {/* voltar */}
 
-        {/* ÁREA PRINCIPAL */}
+              <button
+                onClick={() =>
+                  setView(
+                    "dashboard"
+                  )
+                }
+                className="
+                  w-10
+                  h-10
+                  rounded-xl
+                  bg-white/70
+                  border
+                  border-white
+                  flex
+                  items-center
+                  justify-center
+                  shadow-sm
+                  hover:scale-105
+                  transition-transform
+                  shrink-0
+                "
+                style={{
+                  color: COLORS.dark,
+                }}
+              >
+                <ArrowLeft
+                  size={19}
+                />
+              </button>
 
-        <section className="relative z-10 flex-1 min-w-0 flex flex-col">
-          {/* HEADER */}
+              {/* título */}
 
-          <header className="border-b border-white/10 bg-slate-950/70 backdrop-blur-xl">
-            <div className="px-4 sm:px-6 lg:px-8 py-4">
-              <div className="flex items-center justify-between gap-4">
-                <div className="flex items-center gap-3 min-w-0">
-                  <button
-                    onClick={() =>
-                      setIsMenuOpen(
-                        true
-                      )
-                    }
-                    className="lg:hidden p-2.5 rounded-xl bg-white/5 border border-white/10"
+              <div className="flex-1 min-w-0">
+                <div className="flex items-center gap-2">
+                  <span
+                    className="
+                      text-[9px]
+                      font-black
+                      tracking-[0.2em]
+                      uppercase
+                    "
+                    style={{
+                      color:
+                        COLORS.dark,
+                    }}
                   >
-                    <Menu size={20} />
-                  </button>
+                    VISTORIA
+                  </span>
 
-                  <button
-                    onClick={() =>
-                      setView(
-                        "dashboard"
-                      )
+                  <span className="text-slate-300">
+                    /
+                  </span>
+
+                  <span className="text-[10px] font-bold text-slate-500 truncate">
+                    {
+                      requisitoAtual.categoria
                     }
-                    className="hidden lg:flex p-2.5 rounded-xl bg-white/5 border border-white/10 hover:bg-white/10"
-                  >
-                    <Home size={18} />
-                  </button>
-
-                  <div className="min-w-0">
-                    <p className="text-[9px] tracking-[0.25em] text-cyan-400 font-black">
-                      PRÉ-IMPLANTAÇÃO
-                    </p>
-
-                    <h1 className="font-black truncate">
-                      {vistoria.local}
-                    </h1>
-                  </div>
+                  </span>
                 </div>
 
-                <div className="text-right shrink-0">
-                  <p className="text-[9px] tracking-widest text-slate-500">
-                    REQUISITO
-                  </p>
-
-                  <p className="font-black text-lg">
-                    {String(
-                      currentIndex + 1
-                    ).padStart(
-                      2,
-                      "0"
-                    )}
-                    <span className="text-slate-600">
-                      {" "}
-                      /{" "}
-                      {
-                        checklist.length
-                      }
-                    </span>
-                  </p>
-                </div>
+                <h1 className="font-black text-sm lg:text-base text-slate-700 truncate">
+                  {vistoria.local}
+                </h1>
               </div>
 
-              {/* PROGRESS BAR */}
+              {/* contador */}
 
-              <div className="mt-4 h-1 bg-white/5 rounded-full overflow-hidden">
-                <div
-                  className="h-full bg-gradient-to-r from-cyan-400 via-blue-500 to-cyan-400 transition-all duration-500"
+              <div
+                className="
+                  hidden
+                  sm:flex
+                  items-center
+                  gap-2
+                  px-3
+                  py-2
+                  rounded-xl
+                  bg-white/65
+                  border
+                  border-white
+                "
+              >
+                <span
+                  className="text-sm font-black"
                   style={{
-                    width: `${progressoItem}%`,
+                    color:
+                      COLORS.dark,
+                  }}
+                >
+                  {currentIndex + 1}
+                </span>
+
+                <span className="text-xs text-slate-400">
+                  /
+                </span>
+
+                <span className="text-xs font-bold text-slate-500">
+                  {checklist.length}
+                </span>
+              </div>
+
+              {/* mobile menu */}
+
+              <button
+                onClick={() =>
+                  setIsMenuOpen(true)
+                }
+                className="
+                  lg:hidden
+                  w-10
+                  h-10
+                  rounded-xl
+                  bg-white/70
+                  border
+                  border-white
+                  flex
+                  items-center
+                  justify-center
+                "
+                style={{
+                  color:
+                    COLORS.dark,
+                }}
+              >
+                <Menu size={19} />
+              </button>
+            </div>
+
+            {/* progress */}
+
+            <div className="mt-3 flex items-center gap-3">
+              <div className="flex-1 h-1.5 rounded-full bg-slate-200/70 overflow-hidden">
+                <div
+                  className="h-full rounded-full transition-all duration-500"
+                  style={{
+                    width: `${progressoVistoria}%`,
+                    background: `
+                      linear-gradient(
+                        90deg,
+                        ${COLORS.cerulean},
+                        ${COLORS.turquoise}
+                      )
+                    `,
                   }}
                 />
               </div>
+
+              <span
+                className="text-[10px] font-black"
+                style={{
+                  color:
+                    COLORS.dark,
+                }}
+              >
+                {progressoVistoria}%
+              </span>
             </div>
           </header>
 
-          {/* CONTEÚDO */}
+          {/* ---------------------------------------------
+              ÁREA PRINCIPAL
+          ---------------------------------------------- */}
 
-          <div className="flex-1 flex flex-col px-5 sm:px-8 lg:px-12 py-6 lg:py-10 overflow-y-auto">
-            {/* IDENTIFICAÇÃO */}
+          <section className="flex-1 flex flex-col px-4 lg:px-8 py-5 lg:py-8">
+            <div className="max-w-4xl w-full mx-auto flex-1 flex flex-col">
+              {/* código */}
 
-            <div className="flex flex-wrap items-center gap-2 mb-5">
-              <span className="px-3 py-1.5 rounded-full bg-cyan-400/10 border border-cyan-400/20 text-cyan-300 text-[10px] font-black tracking-wider">
-                {requisitoAtual.codigo}
-              </span>
-
-              <span className="px-3 py-1.5 rounded-full bg-white/5 border border-white/10 text-slate-400 text-[10px] font-bold">
-                {
-                  requisitoAtual.categoria
-                }
-              </span>
-
-              <span className="px-3 py-1.5 rounded-full bg-white/5 border border-white/10 text-slate-500 text-[10px] font-bold">
-                {
-                  requisitoAtual.criticidade
-                }
-              </span>
-
-              {respostaAtual && (
-                <span className="ml-auto px-3 py-1.5 rounded-full bg-emerald-400/10 border border-emerald-400/20 text-emerald-400 text-[10px] font-black">
-                  ITEM AVALIADO
+              <div className="flex items-center gap-2 mb-4">
+                <span
+                  className="
+                    px-3
+                    py-1.5
+                    rounded-full
+                    text-[10px]
+                    font-black
+                    tracking-wider
+                  "
+                  style={{
+                    color:
+                      COLORS.dark,
+                    background:
+                      "rgba(84,180,231,0.14)",
+                  }}
+                >
+                  {requisitoAtual.codigo}
                 </span>
-              )}
-            </div>
 
-            {/* PERGUNTA */}
-
-            <div className="max-w-4xl">
-              <p className="text-[10px] tracking-[0.3em] uppercase text-cyan-400 font-black mb-4">
-                PONTO DE CONTROLE
-              </p>
-
-              <h2 className="text-3xl sm:text-4xl lg:text-5xl font-black tracking-tight leading-[1.08] text-white">
-                {
-                  requisitoAtual.pergunta
-                }
-              </h2>
-
-              <div className="mt-6 flex items-center gap-3 text-xs text-slate-500">
-                <span className="w-2 h-2 rounded-full bg-cyan-400 shadow-[0_0_12px_rgba(34,211,238,0.8)]" />
-
-                Selecione a condição encontrada em campo
+                <span className="text-xs text-slate-400">
+                  {requisitoAtual.criticidade}
+                </span>
               </div>
-            </div>
 
-            {/* ESPAÇO */}
+              {/* CARD DA PERGUNTA */}
 
-            <div className="flex-1 min-h-[40px]" />
-
-            {/* RESPOSTA ATUAL */}
-
-            {respostaAtual && (
-              <div className="mb-5 p-4 rounded-2xl bg-white/[0.03] border border-white/10">
-                <div className="flex items-center gap-3">
-                  {respostaAtual.status ===
-                  "conforme" ? (
-                    <CheckCircle2 className="text-emerald-400" />
-                  ) : respostaAtual.status ===
-                    "ressalva" ? (
-                    <AlertTriangle className="text-amber-400" />
-                  ) : (
-                    <XCircle className="text-rose-400" />
-                  )}
-
-                  <div>
-                    <p className="text-xs font-black uppercase tracking-wider">
-                      Avaliação registrada
-                    </p>
-
-                    <p className="text-[11px] text-slate-500 mt-1">
-                      Este item já possui uma resposta. Você pode alterar a avaliação.
-                    </p>
-                  </div>
-                </div>
-              </div>
-            )}
-
-            {/* BOTÕES DE AVALIAÇÃO */}
-
-            <div>
-              <p className="text-[9px] tracking-[0.25em] text-slate-600 font-black mb-3">
-                REGISTRAR CONDIÇÃO
-              </p>
-
-              <div className="grid grid-cols-3 gap-3">
-                {/* CONFORME */}
-
-                <button
-                  onClick={() =>
-                    void registrarAvaliacao(
-                      "conforme"
-                    )
-                  }
-                  disabled={isSaving}
-                  className="group relative overflow-hidden rounded-2xl p-5 sm:p-6 bg-emerald-400/[0.06] border border-emerald-400/20 hover:border-emerald-400/60 hover:bg-emerald-400/10 transition-all duration-300 disabled:opacity-50"
-                >
-                  <div className="absolute inset-0 bg-gradient-to-br from-emerald-400/10 to-transparent opacity-0 group-hover:opacity-100 transition-opacity" />
-
-                  <div className="relative">
-                    <div className="w-12 h-12 rounded-2xl bg-emerald-400/10 border border-emerald-400/20 flex items-center justify-center mb-4">
-                      <Check
-                        size={25}
-                        className="text-emerald-400"
-                        strokeWidth={3}
-                      />
-                    </div>
-
-                    <p className="text-left text-sm sm:text-base font-black text-emerald-300">
-                      CONFORME
-                    </p>
-
-                    <p className="hidden sm:block text-[10px] text-emerald-400/50 mt-1">
-                      Requisito atendido
-                    </p>
-                  </div>
-                </button>
-
-                {/* RESSALVA */}
-
-                <button
-                  onClick={() =>
-                    setModalAberto(
-                      "ressalva"
-                    )
-                  }
-                  disabled={isSaving}
-                  className="group relative overflow-hidden rounded-2xl p-5 sm:p-6 bg-amber-400/[0.06] border border-amber-400/20 hover:border-amber-400/60 hover:bg-amber-400/10 transition-all duration-300 disabled:opacity-50"
-                >
-                  <div className="absolute inset-0 bg-gradient-to-br from-amber-400/10 to-transparent opacity-0 group-hover:opacity-100 transition-opacity" />
-
-                  <div className="relative">
-                    <div className="w-12 h-12 rounded-2xl bg-amber-400/10 border border-amber-400/20 flex items-center justify-center mb-4">
-                      <AlertTriangle
-                        size={25}
-                        className="text-amber-400"
-                        strokeWidth={2.5}
-                      />
-                    </div>
-
-                    <p className="text-left text-sm sm:text-base font-black text-amber-300">
-                      RESSALVA
-                    </p>
-
-                    <p className="hidden sm:block text-[10px] text-amber-400/50 mt-1">
-                      Registrar não conformidade
-                    </p>
-                  </div>
-                </button>
-
-                {/* NÃO POSSUI */}
-
-                <button
-                  onClick={() =>
-                    setModalAberto(
-                      "nao_possui"
-                    )
-                  }
-                  disabled={isSaving}
-                  className="group relative overflow-hidden rounded-2xl p-5 sm:p-6 bg-rose-400/[0.06] border border-rose-400/20 hover:border-rose-400/60 hover:bg-rose-400/10 transition-all duration-300 disabled:opacity-50"
-                >
-                  <div className="absolute inset-0 bg-gradient-to-br from-rose-400/10 to-transparent opacity-0 group-hover:opacity-100 transition-opacity" />
-
-                  <div className="relative">
-                    <div className="w-12 h-12 rounded-2xl bg-rose-400/10 border border-rose-400/20 flex items-center justify-center mb-4">
-                      <X
-                        size={25}
-                        className="text-rose-400"
-                        strokeWidth={3}
-                      />
-                    </div>
-
-                    <p className="text-left text-sm sm:text-base font-black text-rose-300">
-                      NÃO POSSUI
-                    </p>
-
-                    <p className="hidden sm:block text-[10px] text-rose-400/50 mt-1">
-                      Recurso inexistente
-                    </p>
-                  </div>
-                </button>
-              </div>
-            </div>
-
-            {/* NAVEGAÇÃO */}
-
-            <div className="mt-6 pt-5 border-t border-white/10 flex items-center justify-between gap-3">
-              <button
-                onClick={goPrevious}
-                disabled={
-                  currentIndex ===
-                    0 ||
-                  isSaving
-                }
-                className="flex items-center gap-2 px-5 py-3 rounded-xl bg-white/5 border border-white/10 text-sm font-bold text-slate-300 hover:bg-white/10 disabled:opacity-20 disabled:cursor-not-allowed transition-all"
+              <div
+                className="
+                  rounded-[2rem]
+                  p-6
+                  lg:p-9
+                  bg-white/50
+                  backdrop-blur-2xl
+                  border
+                  border-white/80
+                  shadow-[0_20px_70px_rgba(28,133,168,0.10)]
+                  relative
+                  overflow-hidden
+                "
               >
-                <ArrowLeft
-                  size={18}
+                {/* glow */}
+
+                <div
+                  className="
+                    absolute
+                    -right-24
+                    -top-24
+                    w-64
+                    h-64
+                    rounded-full
+                    blur-3xl
+                    opacity-25
+                  "
+                  style={{
+                    background:
+                      COLORS.sky,
+                  }}
                 />
 
-                <span className="hidden sm:inline">
-                  VOLTAR
-                </span>
-              </button>
-
-              <div className="flex items-center gap-1">
-                {Array.from({
-                  length: Math.min(
-                    checklist.length,
-                    7
-                  ),
-                }).map(
-                  (_, index) => {
-                    const offset =
-                      Math.max(
-                        0,
-                        Math.min(
-                          currentIndex -
-                            3,
-                          checklist.length -
-                            7
-                        )
-                      );
-
-                    const realIndex =
-                      offset +
-                      index;
-
-                    return (
-                      <button
-                        key={
-                          realIndex
-                        }
-                        onClick={() =>
-                          setCurrentIndex(
-                            realIndex
-                          )
-                        }
-                        className={`
-                          w-1.5 h-1.5 rounded-full transition-all
-                          ${
-                            realIndex ===
-                            currentIndex
-                              ? "w-5 bg-cyan-400"
-                              : vistoria
-                                    .respostas[
-                                    checklist[
-                                      realIndex
-                                    ]
-                                      ?.id
-                                  ]
-                                ? "bg-emerald-400"
-                                : "bg-white/20"
-                          }
-                        `}
-                      />
-                    );
-                  }
-                )}
-              </div>
-
-              <button
-                onClick={goNext}
-                disabled={
-                  currentIndex ===
-                    checklist.length -
-                      1 ||
-                  isSaving
-                }
-                className="flex items-center gap-2 px-5 py-3 rounded-xl bg-cyan-400 text-slate-950 text-sm font-black hover:bg-cyan-300 disabled:opacity-20 disabled:cursor-not-allowed transition-all shadow-[0_0_25px_rgba(34,211,238,0.15)]"
-              >
-                <span className="hidden sm:inline">
-                  AVANÇAR
-                </span>
-
-                <ArrowRight
-                  size={18}
-                />
-              </button>
-            </div>
-          </div>
-
-          {/* MOBILE TAB BAR */}
-
-          <div className="lg:hidden">
-            {tabBar}
-          </div>
-        </section>
-
-        {/* =================================================
-            MODAL DE RESSALVA / NÃO POSSUI
-        ================================================= */}
-
-        {(modalAberto ===
-          "ressalva" ||
-          modalAberto ===
-            "nao_possui") && (
-          <div className="fixed inset-0 z-[60] flex items-end sm:items-center justify-center">
-            <div
-              className="absolute inset-0 bg-black/70 backdrop-blur-md"
-              onClick={() =>
-                setModalAberto(null)
-              }
-            />
-
-            <div className="relative w-full sm:max-w-xl bg-slate-950 border border-white/10 rounded-t-[2rem] sm:rounded-3xl p-6 shadow-2xl">
-              <div className="w-12 h-1 bg-white/10 rounded-full mx-auto mb-6 sm:hidden" />
-
-              <div className="flex items-center justify-between mb-5">
-                <div className="flex items-center gap-3">
-                  <div
-                    className={`
-                      p-3 rounded-2xl
-                      ${
-                        modalAberto ===
-                        "ressalva"
-                          ? "bg-amber-400/10 text-amber-400"
-                          : "bg-rose-400/10 text-rose-400"
-                      }
-                    `}
+                <div className="relative z-10">
+                  <p
+                    className="
+                      text-[10px]
+                      font-black
+                      tracking-[0.25em]
+                      uppercase
+                      mb-3
+                    "
+                    style={{
+                      color:
+                        COLORS.petrol,
+                    }}
                   >
-                    {modalAberto ===
-                    "ressalva" ? (
-                      <AlertTriangle
-                        size={22}
-                      />
-                    ) : (
-                      <X size={22} />
-                    )}
-                  </div>
-
-                  <div>
-                    <p className="text-[9px] tracking-[0.2em] text-slate-500 font-black">
-                      REGISTRO DE CAMPO
-                    </p>
-
-                    <h3 className="font-black text-lg">
-                      {modalAberto ===
-                      "ressalva"
-                        ? "Registrar ressalva"
-                        : "Não possui"}
-                    </h3>
-                  </div>
-                </div>
-
-                <button
-                  onClick={() =>
-                    setModalAberto(null)
-                  }
-                  className="p-2 rounded-xl bg-white/5"
-                >
-                  <X size={18} />
-                </button>
-              </div>
-
-              <textarea
-                autoFocus
-                className="w-full bg-white/[0.04] border border-white/10 p-4 rounded-2xl outline-none focus:border-cyan-400 resize-none h-32 text-white placeholder:text-slate-600"
-                placeholder="Descreva a situação encontrada em campo..."
-                value={obsTemp}
-                onChange={(event) =>
-                  setObsTemp(
-                    event.target.value
-                  )
-                }
-              />
-
-              {/* FOTOS */}
-
-              {fotosTemp.length >
-                0 && (
-                <div className="mt-4">
-                  <p className="text-[9px] tracking-widest text-slate-500 font-black mb-2">
-                    EVIDÊNCIAS
+                    REQUISITO DE AVALIAÇÃO
                   </p>
 
-                  <div className="flex gap-2 overflow-x-auto pb-2">
-                    {fotosTemp.map(
-                      (
-                        file,
-                        index
-                      ) => (
-                        <div
+                  <h2
+                    className="
+                      text-2xl
+                      lg:text-4xl
+                      font-black
+                      leading-tight
+                      tracking-tight
+                      text-slate-700
+                    "
+                  >
+                    {
+                      requisitoAtual.pergunta
+                    }
+                  </h2>
+
+                  {respostaAtual && (
+                    <div
+                      className="
+                        mt-5
+                        inline-flex
+                        items-center
+                        gap-2
+                        px-3
+                        py-2
+                        rounded-xl
+                        bg-white/70
+                        border
+                        border-white
+                      "
+                    >
+                      <span
+                        className="w-2 h-2 rounded-full"
+                        style={{
+                          background:
+                            respostaAtual.status ===
+                            "conforme"
+                              ? COLORS.turquoise
+                              : respostaAtual.status ===
+                                "ressalva"
+                              ? COLORS.cerulean
+                              : COLORS.dark,
+                        }}
+                      />
+
+                      <span className="text-xs font-bold text-slate-600">
+                        Item já avaliado
+                      </span>
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              {/* -----------------------------------------
+                  AÇÕES
+              ------------------------------------------ */}
+
+              <div className="mt-5">
+                <p className="text-center text-[10px] font-black uppercase tracking-[0.2em] text-slate-400 mb-3">
+                  REGISTRAR AVALIAÇÃO
+                </p>
+
+                <div className="grid grid-cols-3 gap-2.5 lg:gap-4">
+                  {/* CONFORME */}
+
+                  <button
+                    onClick={() =>
+                      void registrarAvaliacao(
+                        "conforme"
+                      )
+                    }
+                    disabled={
+                      isSaving
+                    }
+                    className="
+                      group
+                      relative
+                      overflow-hidden
+                      min-h-[120px]
+                      lg:min-h-[145px]
+                      rounded-[1.5rem]
+                      p-4
+                      flex
+                      flex-col
+                      items-center
+                      justify-center
+                      gap-3
+                      bg-white/55
+                      backdrop-blur-xl
+                      border
+                      border-white
+                      hover:-translate-y-1
+                      active:translate-y-0
+                      transition-all
+                      shadow-sm
+                    "
+                    style={{
+                      color:
+                        COLORS.turquoise,
+                    }}
+                  >
+                    <div
+                      className="
+                        w-12
+                        h-12
+                        rounded-2xl
+                        flex
+                        items-center
+                        justify-center
+                        group-hover:scale-110
+                        transition-transform
+                      "
+                      style={{
+                        background:
+                          "rgba(67,195,188,0.15)",
+                      }}
+                    >
+                      <Check
+                        size={26}
+                        strokeWidth={3}
+                      />
+                    </div>
+
+                    <span className="font-black text-xs lg:text-sm">
+                      CONFORME
+                    </span>
+                  </button>
+
+                  {/* RESSALVA */}
+
+                  <button
+                    onClick={() =>
+                      setModalAberto(
+                        "ressalva"
+                      )
+                    }
+                    disabled={
+                      isSaving
+                    }
+                    className="
+                      group
+                      relative
+                      overflow-hidden
+                      min-h-[120px]
+                      lg:min-h-[145px]
+                      rounded-[1.5rem]
+                      p-4
+                      flex
+                      flex-col
+                      items-center
+                      justify-center
+                      gap-3
+                      bg-white/55
+                      backdrop-blur-xl
+                      border
+                      border-white
+                      hover:-translate-y-1
+                      active:translate-y-0
+                      transition-all
+                      shadow-sm
+                    "
+                    style={{
+                      color:
+                        COLORS.cerulean,
+                    }}
+                  >
+                    <div
+                      className="
+                        w-12
+                        h-12
+                        rounded-2xl
+                        flex
+                        items-center
+                        justify-center
+                        group-hover:scale-110
+                        transition-transform
+                      "
+                      style={{
+                        background:
+                          "rgba(84,180,231,0.15)",
+                      }}
+                    >
+                      <AlertTriangle
+                        size={25}
+                        strokeWidth={2.7}
+                      />
+                    </div>
+
+                    <span className="font-black text-xs lg:text-sm">
+                      RESSALVA
+                    </span>
+                  </button>
+
+                  {/* NÃO POSSUI */}
+
+                  <button
+                    onClick={() =>
+                      setModalAberto(
+                        "nao_possui"
+                      )
+                    }
+                    disabled={
+                      isSaving
+                    }
+                    className="
+                      group
+                      relative
+                      overflow-hidden
+                      min-h-[120px]
+                      lg:min-h-[145px]
+                      rounded-[1.5rem]
+                      p-4
+                      flex
+                      flex-col
+                      items-center
+                      justify-center
+                      gap-3
+                      bg-white/55
+                      backdrop-blur-xl
+                      border
+                      border-white
+                      hover:-translate-y-1
+                      active:translate-y-0
+                      transition-all
+                      shadow-sm
+                    "
+                    style={{
+                      color:
+                        COLORS.dark,
+                    }}
+                  >
+                    <div
+                      className="
+                        w-12
+                        h-12
+                        rounded-2xl
+                        flex
+                        items-center
+                        justify-center
+                        group-hover:scale-110
+                        transition-transform
+                      "
+                      style={{
+                        background:
+                          "rgba(28,133,168,0.12)",
+                      }}
+                    >
+                      <X
+                        size={26}
+                        strokeWidth={3}
+                      />
+                    </div>
+
+                    <span className="font-black text-xs lg:text-sm">
+                      NÃO POSSUI
+                    </span>
+                  </button>
+                </div>
+              </div>
+
+              {/* -----------------------------------------
+                  NAVEGAÇÃO
+              ------------------------------------------ */}
+
+              <div
+                className="
+                  mt-auto
+                  pt-6
+                  flex
+                  items-center
+                  justify-between
+                  gap-3
+                "
+              >
+                <button
+                  onClick={
+                    goPrevious
+                  }
+                  disabled={
+                    currentIndex ===
+                      0 ||
+                    isSaving
+                  }
+                  className="
+                    flex-1
+                    max-w-[180px]
+                    py-3.5
+                    rounded-2xl
+                    bg-white/60
+                    backdrop-blur-xl
+                    border
+                    border-white
+                    flex
+                    items-center
+                    justify-center
+                    gap-2
+                    text-xs
+                    font-black
+                    text-slate-500
+                    disabled:opacity-30
+                    hover:bg-white
+                    transition-all
+                  "
+                >
+                  <ChevronLeft
+                    size={18}
+                  />
+                  ANTERIOR
+                </button>
+
+                <div
+                  className="
+                    hidden
+                    sm:flex
+                    items-center
+                    gap-1
+                  "
+                >
+                  {Array.from({
+                    length: Math.min(
+                      5,
+                      checklist.length
+                    ),
+                  }).map(
+                    (_, index) => {
+                      const offset =
+                        Math.min(
+                          Math.max(
+                            currentIndex -
+                              2,
+                            0
+                          ),
+                          Math.max(
+                            checklist.length -
+                              5,
+                            0
+                          )
+                        );
+
+                      const realIndex =
+                        offset +
+                        index;
+
+                      return (
+                        <button
                           key={
-                            index
+                            realIndex
                           }
+                          onClick={() =>
+                            setCurrentIndex(
+                              realIndex
+                            )
+                          }
+                          className="
+                            w-2
+                            h-2
+                            rounded-full
+                            transition-all
+                          "
+                          style={{
+                            background:
+                              realIndex ===
+                              currentIndex
+                                ? COLORS.dark
+                                : "rgba(28,133,168,0.20)",
+                            transform:
+                              realIndex ===
+                              currentIndex
+                                ? "scale(1.5)"
+                                : "scale(1)",
+                          }}
+                        />
+                      );
+                    }
+                  )}
+                </div>
+
+                <button
+                  onClick={
+                    goNext
+                  }
+                  disabled={
+                    currentIndex >=
+                      checklist.length -
+                        1 ||
+                    isSaving
+                  }
+                  className="
+                    flex-1
+                    max-w-[180px]
+                    py-3.5
+                    rounded-2xl
+                    text-white
+                    flex
+                    items-center
+                    justify-center
+                    gap-2
+                    text-xs
+                    font-black
+                    disabled:opacity-30
+                    shadow-lg
+                    hover:-translate-y-0.5
+                    transition-all
+                  "
+                  style={{
+                    background: `
+                      linear-gradient(
+                        135deg,
+                        ${COLORS.cerulean},
+                        ${COLORS.petrol}
+                      )
+                    `,
+                  }}
+                >
+                  PRÓXIMO
+                  <ChevronRight
+                    size={18}
+                  />
+                </button>
+              </div>
+            </div>
+          </section>
+        </div>
+      </div>
+
+      {/* =================================================
+          MENU MOBILE
+      ================================================== */}
+
+      {isMenuOpen && (
+        <div className="fixed inset-0 z-[70] lg:hidden">
+          <div
+            className="
+              absolute
+              inset-0
+              bg-slate-900/20
+              backdrop-blur-sm
+            "
+            onClick={() =>
+              setIsMenuOpen(false)
+            }
+          />
+
+          <div className="absolute left-0 top-0 bottom-0">
+            {topicListNav}
+          </div>
+        </div>
+      )}
+
+      {/* =================================================
+          MODAL RESSALVA / NÃO POSSUI
+      ================================================== */}
+
+      {(modalAberto ===
+        "ressalva" ||
+        modalAberto ===
+          "nao_possui") && (
+        <div className="fixed inset-0 z-[90] flex items-end lg:items-center justify-center">
+          <div
+            className="
+              absolute
+              inset-0
+              bg-slate-900/20
+              backdrop-blur-md
+            "
+            onClick={() =>
+              setModalAberto(
+                null
+              )
+            }
+          />
+
+          <div
+            className="
+              relative
+              z-10
+              w-full
+              lg:max-w-lg
+              rounded-t-[2rem]
+              lg:rounded-[2rem]
+              p-6
+              pb-7
+              bg-white/85
+              backdrop-blur-2xl
+              border
+              border-white
+              shadow-[0_-20px_80px_rgba(28,133,168,0.20)]
+            "
+          >
+            <div className="flex justify-center lg:hidden mb-4">
+              <div className="w-12 h-1.5 rounded-full bg-slate-200" />
+            </div>
+
+            <div className="flex items-center justify-between mb-5">
+              <div className="flex items-center gap-3">
+                <div
+                  className="
+                    w-11
+                    h-11
+                    rounded-2xl
+                    flex
+                    items-center
+                    justify-center
+                  "
+                  style={{
+                    color:
+                      modalAberto ===
+                      "ressalva"
+                        ? COLORS.cerulean
+                        : COLORS.dark,
+                    background:
+                      modalAberto ===
+                      "ressalva"
+                        ? "rgba(84,180,231,0.14)"
+                        : "rgba(28,133,168,0.10)",
+                  }}
+                >
+                  {modalAberto ===
+                  "ressalva" ? (
+                    <AlertTriangle
+                      size={21}
+                    />
+                  ) : (
+                    <X size={22} />
+                  )}
+                </div>
+
+                <div>
+                  <p
+                    className="text-[10px] font-black tracking-widest"
+                    style={{
+                      color:
+                        modalAberto ===
+                        "ressalva"
+                          ? COLORS.cerulean
+                          : COLORS.dark,
+                    }}
+                  >
+                    REGISTRO
+                  </p>
+
+                  <h3 className="font-black text-lg text-slate-700">
+                    {modalAberto ===
+                    "ressalva"
+                      ? "Registrar ressalva"
+                      : "Não possui"}
+                  </h3>
+                </div>
+              </div>
+
+              <button
+                onClick={() =>
+                  setModalAberto(
+                    null
+                  )
+                }
+                className="
+                  w-9
+                  h-9
+                  rounded-full
+                  bg-white
+                  border
+                  border-slate-100
+                  flex
+                  items-center
+                  justify-center
+                  text-slate-400
+                "
+              >
+                <X size={18} />
+              </button>
+            </div>
+
+            {/* observação */}
+
+            <textarea
+              autoFocus
+              value={obsTemp}
+              onChange={(event) =>
+                setObsTemp(
+                  event.target.value
+                )
+              }
+              placeholder="Descreva a situação encontrada..."
+              className="
+                w-full
+                h-28
+                resize-none
+                rounded-2xl
+                bg-white/70
+                border
+                border-slate-200
+                p-4
+                outline-none
+                text-sm
+                text-slate-700
+                placeholder:text-slate-400
+              "
+            />
+
+            {/* fotos */}
+
+            {fotosTemp.length > 0 && (
+              <div className="mt-4">
+                <p className="text-[10px] font-black tracking-wider text-slate-400 mb-2">
+                  EVIDÊNCIAS
+                </p>
+
+                <div className="flex gap-2 overflow-x-auto pb-1">
+                  {fotosTemp.map(
+                    (
+                      file,
+                      index
+                    ) => {
+                      const preview =
+                        URL.createObjectURL(
+                          file
+                        );
+
+                      return (
+                        <div
+                          key={`${file.name}-${index}`}
                           className="relative shrink-0"
                         >
                           <img
-                            src={URL.createObjectURL(
-                              file
-                            )}
+                            src={
+                              preview
+                            }
                             alt={`Preview ${
                               index +
                               1
                             }`}
-                            className="w-20 h-20 rounded-xl object-cover border border-white/10"
+                            className="
+                              w-20
+                              h-20
+                              rounded-xl
+                              object-cover
+                              border
+                              border-white
+                              shadow-sm
+                            "
                           />
 
                           <button
@@ -2369,90 +3702,156 @@ export default function PreImplantacaoApp() {
                                 index
                               )
                             }
-                            className="absolute -top-2 -right-2 bg-rose-500 text-white rounded-full p-1"
+                            className="
+                              absolute
+                              -top-1
+                              -right-1
+                              w-6
+                              h-6
+                              rounded-full
+                              bg-white
+                              shadow-md
+                              flex
+                              items-center
+                              justify-center
+                            "
+                            style={{
+                              color:
+                                COLORS.dark,
+                            }}
                           >
-                            <X
-                              size={
-                                13
-                              }
+                            <XCircle
+                              size={18}
                             />
                           </button>
                         </div>
-                      )
-                    )}
-                  </div>
+                      );
+                    }
+                  )}
                 </div>
-              )}
-
-              {/* AÇÕES */}
-
-              <div className="grid grid-cols-2 gap-3 mt-4">
-                <label className="cursor-pointer py-3 rounded-xl bg-white/5 border border-white/10 flex justify-center items-center gap-2 text-xs font-black hover:bg-white/10">
-                  <Camera
-                    size={17}
-                  />
-                  CÂMERA
-
-                  <input
-                    type="file"
-                    accept="image/*"
-                    capture="environment"
-                    className="hidden"
-                    onChange={
-                      handleFileSelect
-                    }
-                  />
-                </label>
-
-                <label className="cursor-pointer py-3 rounded-xl bg-white/5 border border-white/10 flex justify-center items-center gap-2 text-xs font-black hover:bg-white/10">
-                  <BarChart2
-                    size={17}
-                  />
-                  GALERIA
-
-                  <input
-                    type="file"
-                    accept="image/*"
-                    multiple
-                    className="hidden"
-                    onChange={
-                      handleFileSelect
-                    }
-                  />
-                </label>
               </div>
+            )}
 
-              <button
-                onClick={() =>
-                  void registrarAvaliacao(
-                    modalAberto,
-                    obsTemp
-                  )
-                }
-                disabled={
-                  isSaving ||
-                  (!obsTemp.trim() &&
-                    fotosTemp.length ===
-                      0)
-                }
-                className="w-full mt-3 py-4 rounded-xl bg-cyan-400 text-slate-950 font-black disabled:opacity-30 flex items-center justify-center gap-2"
+            {/* ações */}
+
+            <div className="grid grid-cols-2 gap-2 mt-5">
+              <label
+                className="
+                  py-3
+                  rounded-xl
+                  bg-white/70
+                  border
+                  border-white
+                  flex
+                  items-center
+                  justify-center
+                  gap-2
+                  text-xs
+                  font-black
+                  text-slate-500
+                  cursor-pointer
+                "
               >
-                {isSaving ? (
-                  <>
-                    <span className="w-4 h-4 border-2 border-slate-950/30 border-t-slate-950 rounded-full animate-spin" />
-                    SALVANDO...
-                  </>
-                ) : (
-                  <>
-                    <Check size={19} />
-                    REGISTRAR AVALIAÇÃO
-                  </>
-                )}
-              </button>
+                <Camera
+                  size={17}
+                />
+                CÂMERA
+
+                <input
+                  type="file"
+                  accept="image/*"
+                  capture="environment"
+                  className="hidden"
+                  onChange={
+                    handleFileSelect
+                  }
+                />
+              </label>
+
+              <label
+                className="
+                  py-3
+                  rounded-xl
+                  bg-white/70
+                  border
+                  border-white
+                  flex
+                  items-center
+                  justify-center
+                  gap-2
+                  text-xs
+                  font-black
+                  text-slate-500
+                  cursor-pointer
+                "
+              >
+                <ImageIcon
+                  size={17}
+                />
+                GALERIA
+
+                <input
+                  type="file"
+                  accept="image/*"
+                  multiple
+                  className="hidden"
+                  onChange={
+                    handleFileSelect
+                  }
+                />
+              </label>
             </div>
+
+            <button
+              onClick={() =>
+                void registrarAvaliacao(
+                  modalAberto ===
+                    "ressalva"
+                    ? "ressalva"
+                    : "nao_possui",
+                  obsTemp
+                )
+              }
+              disabled={
+                isSaving ||
+                (!obsTemp.trim() &&
+                  fotosTemp.length ===
+                    0)
+              }
+              className="
+                w-full
+                mt-3
+                py-4
+                rounded-xl
+                text-white
+                font-black
+                text-sm
+                flex
+                items-center
+                justify-center
+                gap-2
+                disabled:opacity-40
+                shadow-lg
+              "
+              style={{
+                background: `
+                  linear-gradient(
+                    135deg,
+                    ${COLORS.petrol},
+                    ${COLORS.dark}
+                  )
+                `,
+              }}
+            >
+              <Check size={19} />
+
+              {isSaving
+                ? "SALVANDO..."
+                : "CONCLUIR AVALIAÇÃO"}
+            </button>
           </div>
-        )}
-      </div>
+        </div>
+      )}
     </main>
   );
 }
