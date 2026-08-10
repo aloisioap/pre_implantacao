@@ -2,6 +2,7 @@ export type StatusAvaliacao = "nao_avaliado" | "conforme" | "ressalva" | "nao_po
 export type Criticidade = "critica" | "alta" | "media" | "baixa";
 
 export interface Vistoriador {
+  id: number;
   nome: string;
   funcao: string;
 }
