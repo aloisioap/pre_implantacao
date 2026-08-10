@@ -90,14 +90,16 @@ export default function EvidenciasVistoria({
   const timerRef =
     useRef<ReturnType<typeof setInterval> | null>(null);
 
-  /*
-   * Limpa recursos quando o componente
-   * é desmontado.
+  /**
+   * ============================================================
+   * LIMPEZA
+   * ============================================================
    */
   useEffect(() => {
     return () => {
       if (timerRef.current) {
         clearInterval(timerRef.current);
+        timerRef.current = null;
       }
 
       if (audioPreview) {
@@ -106,8 +108,10 @@ export default function EvidenciasVistoria({
     };
   }, [audioPreview]);
 
-  /*
-   * Formata segundos para MM:SS.
+  /**
+   * ============================================================
+   * FORMATA DURAÇÃO
+   * ============================================================
    */
   const formatarDuracao = (segundos: number) => {
     const minutos = Math.floor(segundos / 60);
@@ -124,9 +128,10 @@ export default function EvidenciasVistoria({
     )}`;
   };
 
-  /*
-   * Adiciona evidências ao estado
-   * do componente pai.
+  /**
+   * ============================================================
+   * ADICIONAR EVIDÊNCIAS
+   * ============================================================
    */
   const adicionarEvidencias = (
     novasEvidencias: Evidencia[]
@@ -137,8 +142,10 @@ export default function EvidenciasVistoria({
     ]);
   };
 
-  /*
-   * Remove uma evidência.
+  /**
+   * ============================================================
+   * REMOVER EVIDÊNCIA
+   * ============================================================
    */
   const removerEvidencia = (
     id: string
@@ -147,9 +154,10 @@ export default function EvidenciasVistoria({
       (item) => item.id === id
     );
 
-    /*
-     * Só revoga URLs blob locais.
-     * URLs do Supabase não devem
+    /**
+     * Só revoga Blob URLs locais.
+     *
+     * URLs do Supabase Storage não devem
      * ser revogadas.
      */
     if (
@@ -166,10 +174,10 @@ export default function EvidenciasVistoria({
       )
     );
 
-    /*
-     * Se a evidência removida era o
-     * áudio associado à transcrição,
-     * limpa a transcrição.
+    /**
+     * Se a evidência removida era a
+     * evidência associada à transcrição,
+     * limpa também a transcrição.
      */
     if (
       transcricao?.evidenciaId === id
@@ -181,8 +189,10 @@ export default function EvidenciasVistoria({
     }
   };
 
-  /*
-   * Processa fotos e arquivos selecionados.
+  /**
+   * ============================================================
+   * PROCESSAR ARQUIVOS
+   * ============================================================
    */
   const handleArquivos = (
     event: ChangeEvent<HTMLInputElement>
@@ -231,15 +241,17 @@ export default function EvidenciasVistoria({
       novasEvidencias
     );
 
-    /*
+    /**
      * Permite selecionar novamente
      * o mesmo arquivo.
      */
     event.target.value = "";
   };
 
-  /*
-   * Inicia a gravação do áudio.
+  /**
+   * ============================================================
+   * INICIAR GRAVAÇÃO
+   * ============================================================
    */
   const iniciarGravacao =
     async () => {
@@ -362,11 +374,11 @@ export default function EvidenciasVistoria({
             novaEvidencia,
           ]);
 
-          /*
-           * A transcrição ainda não
-           * é executada nesta etapa.
+          /**
+           * A transcrição será processada
+           * posteriormente.
            *
-           * Fluxo futuro:
+           * Fluxo:
            *
            * Áudio
            *   ↓
@@ -378,9 +390,12 @@ export default function EvidenciasVistoria({
            */
           onTranscricaoChange?.({
             texto: "",
+
             status: "pendente",
+
             evidenciaId:
               novaEvidencia.id,
+
             timestamp:
               new Date().toISOString(),
           });
@@ -428,8 +443,10 @@ export default function EvidenciasVistoria({
       }
     };
 
-  /*
-   * Finaliza a gravação.
+  /**
+   * ============================================================
+   * PARAR GRAVAÇÃO
+   * ============================================================
    */
   const pararGravacao = () => {
     if (
@@ -449,8 +466,10 @@ export default function EvidenciasVistoria({
     }
   };
 
-  /*
-   * Alterna gravação.
+  /**
+   * ============================================================
+   * ALTERNAR GRAVAÇÃO
+   * ============================================================
    */
   const alternarGravacao = () => {
     if (disabled) {
@@ -467,8 +486,10 @@ export default function EvidenciasVistoria({
     }
   };
 
-  /*
-   * Reproduz / pausa o áudio.
+  /**
+   * ============================================================
+   * REPRODUZIR / PAUSAR ÁUDIO
+   * ============================================================
    */
   const alternarAudio = () => {
     if (
@@ -485,7 +506,9 @@ export default function EvidenciasVistoria({
       audioElementRef.current
         .play()
         .then(() => {
-          setAudioTocando(true);
+          setAudioTocando(
+            true
+          );
         })
         .catch((error) => {
           console.error(
@@ -496,9 +519,10 @@ export default function EvidenciasVistoria({
     }
   };
 
-  /*
-   * Cancela somente a prévia
-   * local da última gravação.
+  /**
+   * ============================================================
+   * CANCELAR PRÉVIA DO ÁUDIO
+   * ============================================================
    */
   const cancelarAudioPreview =
     () => {
@@ -512,9 +536,12 @@ export default function EvidenciasVistoria({
 
       setAudioTocando(false);
 
-      /*
+      /**
        * Remove também a última
        * evidência de áudio local.
+       *
+       * A checagem usa ?. porque
+       * Evidencia.url é opcional.
        */
       const ultimoAudio =
         [...evidencias]
@@ -523,12 +550,22 @@ export default function EvidenciasVistoria({
             (item) =>
               item.tipo ===
                 "audio" &&
-              item.url.startsWith(
+              item.url?.startsWith(
                 "blob:"
               )
           );
 
       if (ultimoAudio) {
+        if (
+          ultimoAudio.url?.startsWith(
+            "blob:"
+          )
+        ) {
+          URL.revokeObjectURL(
+            ultimoAudio.url
+          );
+        }
+
         onEvidenciasChange?.(
           evidencias.filter(
             (item) =>
@@ -549,10 +586,16 @@ export default function EvidenciasVistoria({
       }
     };
 
+  /**
+   * ============================================================
+   * FILTROS
+   * ============================================================
+   */
   const imagens =
     evidencias.filter(
       (evidencia) =>
-        evidencia.tipo === "foto"
+        evidencia.tipo ===
+        "foto"
     );
 
   const arquivos =
@@ -565,9 +608,15 @@ export default function EvidenciasVistoria({
   const audios =
     evidencias.filter(
       (evidencia) =>
-        evidencia.tipo === "audio"
+        evidencia.tipo ===
+        "audio"
     );
 
+  /**
+   * ============================================================
+   * RENDER
+   * ============================================================
+   */
   return (
     <div className="space-y-3">
 
@@ -585,9 +634,7 @@ export default function EvidenciasVistoria({
           p-4
         "
       >
-
         <div className="flex items-center justify-between mb-3">
-
           <div>
             <p className="text-xs font-black tracking-[0.18em] uppercase text-[#1C85A8]">
               Evidências
@@ -598,7 +645,8 @@ export default function EvidenciasVistoria({
             </p>
           </div>
 
-          {evidencias.length > 0 && (
+          {evidencias.length >
+            0 && (
             <span
               className="
                 px-2.5 py-1
@@ -612,7 +660,6 @@ export default function EvidenciasVistoria({
               {evidencias.length}
             </span>
           )}
-
         </div>
 
         {/* ============================================= */}
@@ -654,7 +701,6 @@ export default function EvidenciasVistoria({
               }
             `}
           >
-
             <span
               className="
                 absolute
@@ -684,7 +730,6 @@ export default function EvidenciasVistoria({
               }
               disabled={disabled}
             />
-
           </label>
 
           {/* GALERIA */}
@@ -719,7 +764,6 @@ export default function EvidenciasVistoria({
               }
             `}
           >
-
             <span
               className="
                 absolute
@@ -749,7 +793,6 @@ export default function EvidenciasVistoria({
               }
               disabled={disabled}
             />
-
           </label>
 
           {/* ÁUDIO */}
@@ -800,7 +843,6 @@ export default function EvidenciasVistoria({
               }
             `}
           >
-
             {gravacaoEstado ===
             "gravando" ? (
               <>
@@ -843,9 +885,7 @@ export default function EvidenciasVistoria({
                 </span>
               </>
             )}
-
           </button>
-
         </div>
 
         {/* ============================================= */}
@@ -878,7 +918,6 @@ export default function EvidenciasVistoria({
             }
           `}
         >
-
           <Paperclip size={15} />
 
           ANEXAR ARQUIVO / DOCUMENTO
@@ -892,7 +931,6 @@ export default function EvidenciasVistoria({
             }
             disabled={disabled}
           />
-
         </label>
 
         {/* ============================================= */}
@@ -915,17 +953,14 @@ export default function EvidenciasVistoria({
               text-xs
             "
           >
-
             <X
               size={15}
               className="shrink-0 mt-0.5"
             />
 
             <span>{erro}</span>
-
           </div>
         )}
-
       </div>
 
       {/* ================================================= */}
@@ -944,7 +979,6 @@ export default function EvidenciasVistoria({
             p-3
           "
         >
-
           <div className="flex items-center gap-3">
 
             <button
@@ -976,7 +1010,6 @@ export default function EvidenciasVistoria({
             </button>
 
             <div className="flex-1 min-w-0">
-
               <p className="text-xs font-black text-[#1C85A8]">
                 Áudio registrado
               </p>
@@ -988,7 +1021,6 @@ export default function EvidenciasVistoria({
                 {" • "}
                 aguardando transcrição
               </p>
-
             </div>
 
             <button
@@ -1005,18 +1037,20 @@ export default function EvidenciasVistoria({
             >
               <Trash2 size={16} />
             </button>
-
           </div>
 
           <audio
-            ref={audioElementRef}
+            ref={
+              audioElementRef
+            }
             src={audioPreview}
             onEnded={() =>
-              setAudioTocando(false)
+              setAudioTocando(
+                false
+              )
             }
             className="hidden"
           />
-
         </div>
       )}
 
@@ -1035,7 +1069,6 @@ export default function EvidenciasVistoria({
             p-4
           "
         >
-
           <div className="flex items-center gap-2 mb-3">
 
             {transcricao.status ===
@@ -1075,6 +1108,12 @@ export default function EvidenciasVistoria({
               </span>
             )}
 
+            {transcricao.status ===
+              "erro" && (
+              <span className="text-[10px] text-red-400">
+                Erro
+              </span>
+            )}
           </div>
 
           {transcricao.texto ? (
@@ -1120,8 +1159,10 @@ export default function EvidenciasVistoria({
                 }
               />
 
-              Aguardando transcrição
-              do áudio...
+              {transcricao.status ===
+              "erro"
+                ? "Não foi possível processar a transcrição."
+                : "Aguardando transcrição do áudio..."}
 
             </div>
           )}
@@ -1131,7 +1172,6 @@ export default function EvidenciasVistoria({
               {transcricao.erro}
             </p>
           )}
-
         </div>
       )}
 
@@ -1149,7 +1189,6 @@ export default function EvidenciasVistoria({
           p-4
         "
       >
-
         <div className="flex items-center gap-2 mb-2">
 
           <FileText
@@ -1160,7 +1199,6 @@ export default function EvidenciasVistoria({
           <span className="text-xs font-black text-[#1C85A8]">
             OBSERVAÇÃO TÉCNICA
           </span>
-
         </div>
 
         <textarea
@@ -1190,7 +1228,6 @@ export default function EvidenciasVistoria({
             focus:ring-[#54B4E7]/25
           "
         />
-
       </div>
 
       {/* ================================================= */}
@@ -1212,7 +1249,6 @@ export default function EvidenciasVistoria({
             p-4
           "
         >
-
           <div className="flex items-center gap-2 mb-3">
 
             <ImageIcon
@@ -1223,12 +1259,13 @@ export default function EvidenciasVistoria({
             <span className="text-xs font-black text-[#1C85A8]">
               REGISTROS
             </span>
-
           </div>
 
           <div className="flex flex-wrap gap-2">
 
+            {/* ================================================= */}
             {/* FOTOS */}
+            {/* ================================================= */}
 
             {imagens.map(
               (evidencia) => (
@@ -1248,21 +1285,29 @@ export default function EvidenciasVistoria({
                     group
                   "
                 >
-
-                  <img
-                    src={
-                      evidencia.url
-                    }
-                    alt={
-                      evidencia.nome ||
-                      "Evidência da vistoria"
-                    }
-                    className="
-                      w-full
-                      h-full
-                      object-cover
-                    "
-                  />
+                  {evidencia.url ? (
+                    <img
+                      src={
+                        evidencia.url
+                      }
+                      alt={
+                        evidencia.nome ||
+                        "Evidência da vistoria"
+                      }
+                      className="
+                        w-full
+                        h-full
+                        object-cover
+                      "
+                    />
+                  ) : (
+                    <div className="w-full h-full flex items-center justify-center bg-slate-100">
+                      <ImageIcon
+                        size={20}
+                        className="text-slate-400"
+                      />
+                    </div>
+                  )}
 
                   <button
                     type="button"
@@ -1287,12 +1332,13 @@ export default function EvidenciasVistoria({
                   >
                     <X size={12} />
                   </button>
-
                 </div>
               )
             )}
 
+            {/* ================================================= */}
             {/* ARQUIVOS */}
+            {/* ================================================= */}
 
             {arquivos.map(
               (evidencia) => (
@@ -1316,7 +1362,6 @@ export default function EvidenciasVistoria({
                     p-2
                   "
                 >
-
                   <FileText
                     size={22}
                     className="text-[#1C85A8]"
@@ -1331,7 +1376,8 @@ export default function EvidenciasVistoria({
                       w-full
                     "
                   >
-                    {evidencia.nome}
+                    {evidencia.nome ||
+                      "Arquivo"}
                   </span>
 
                   <button
@@ -1351,12 +1397,13 @@ export default function EvidenciasVistoria({
                   >
                     <X size={12} />
                   </button>
-
                 </div>
               )
             )}
 
+            {/* ================================================= */}
             {/* ÁUDIOS */}
+            {/* ================================================= */}
 
             {audios.map(
               (evidencia) => (
@@ -1374,12 +1421,17 @@ export default function EvidenciasVistoria({
                     p-3
                   "
                 >
-
                   <div className="flex items-center gap-2">
 
                     <button
                       type="button"
                       onClick={() => {
+                        if (
+                          !evidencia.url
+                        ) {
+                          return;
+                        }
+
                         const audio =
                           new Audio(
                             evidencia.url
@@ -1388,7 +1440,9 @@ export default function EvidenciasVistoria({
                         audio
                           .play()
                           .catch(
-                            (error) => {
+                            (
+                              error
+                            ) => {
                               console.error(
                                 "Erro ao reproduzir áudio:",
                                 error
@@ -1396,6 +1450,9 @@ export default function EvidenciasVistoria({
                             }
                           );
                       }}
+                      disabled={
+                        !evidencia.url
+                      }
                       className="
                         w-8
                         h-8
@@ -1405,6 +1462,7 @@ export default function EvidenciasVistoria({
                         flex
                         items-center
                         justify-center
+                        disabled:opacity-40
                       "
                     >
                       <Play
@@ -1414,7 +1472,6 @@ export default function EvidenciasVistoria({
                     </button>
 
                     <div className="min-w-0">
-
                       <p className="text-[10px] font-black text-[#1C85A8]">
                         Áudio
                       </p>
@@ -1425,7 +1482,6 @@ export default function EvidenciasVistoria({
                             0
                         )}
                       </p>
-
                     </div>
 
                     <button
@@ -1445,18 +1501,13 @@ export default function EvidenciasVistoria({
                         size={14}
                       />
                     </button>
-
                   </div>
-
                 </div>
               )
             )}
-
           </div>
-
         </div>
       )}
-
     </div>
   );
 }
