@@ -67,9 +67,17 @@ export default function PreImplantacaoApp() {
   const updateVistoriaInDb = async (updates: Partial<VistoriaState>) => {
     if (!activeVistoriaId) return;
 
+    const dbUpdates: { [key: string]: any } = {};
+    if (updates.local) dbUpdates.local = updates.local;
+    if (updates.respostas) dbUpdates.respostas = updates.respostas;
+    if (updates.vistoriador) dbUpdates.vistoriador_id = updates.vistoriador.id;
+
+    // Não faz nada se não houver campos para atualizar no banco
+    if (Object.keys(dbUpdates).length === 0) return;
+
     const { error } = await supabase
       .from('vistorias')
-      .update({ ...updates, updated_at: new Date().toISOString() })
+      .update({ ...dbUpdates, updated_at: new Date().toISOString() })
       .eq('id', activeVistoriaId);
 
     if (error) console.error("Erro ao salvar vistoria:", error);
