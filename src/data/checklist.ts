@@ -7,8 +7,10 @@ export const checklist: Requisito[] = [
   { id: "DOC-03", codigo: "DOC-03", pergunta: "Projeto de climatização disponível?", categoria: "01 — Documentação Técnica", criticidade: "alta", referencias: [] },
   
   // 02 — INFRAESTRUTURA / ARQUITETURA
-  { id: "ARQ-01", codigo: "ARQ-01", pergunta: "Áreas estão concluídas?", categoria: "02 — Infraestrutura / Arquitetura", criticidade: "alta", referencias: [] },
-  { id: "ARQ-02", codigo: "ARQ-02", pergunta: "Ambientes possuem identificação?", categoria: "02 — Infraestrutura / Arquitetura", criticidade: "baixa", referencias: [] },
+  { id: "ARQ-01", codigo: "ARQ-01", pergunta: "As paredes e pisos onde os equipamentos serão instalados estão finalizados?", categoria: "02 — Infraestrutura / Arquitetura", criticidade: "alta", referencias: [] },
+  { id: "ARQ-02", codigo: "ARQ-02", pergunta: "As bancadas de suporte para os equipamentos estão instaladas e niveladas?", categoria: "02 — Infraestrutura / Arquitetura", criticidade: "alta", referencias: [] },
+  { id: "ARQ-03", codigo: "ARQ-03", pergunta: "Existe espaço de circulação adequado ao redor dos pontos de instalação dos equipamentos?", categoria: "02 — Infraestrutura / Arquitetura", criticidade: "media", referencias: [] },
+  { id: "ARQ-04", codigo: "ARQ-04", pergunta: "A sala está limpa e livre de detritos de construção?", categoria: "02 — Infraestrutura / Arquitetura", criticidade: "alta", referencias: [] },
   
   // 03 — ELÉTRICA
   { id: "EL-01", codigo: "EL-01", pergunta: "Possui alimentação elétrica adequada?", categoria: "03 — Elétrica", criticidade: "critica", referencias: ["ABNT NBR 5410"] },
