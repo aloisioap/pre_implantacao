@@ -1,3 +1,4 @@
+```ts
 export type StatusAvaliacao =
   | "nao_avaliado"
   | "conforme"
@@ -17,20 +18,31 @@ export type Criticidade =
 export type TipoEvidencia =
   | "foto"
   | "arquivo"
-  | "audio";
+  | "audio"
+  | "texto";
 
 /**
  * Evidência individual vinculada a uma resposta.
  */
 export interface Evidencia {
+  /**
+   * Identificador único da evidência.
+   */
   id: string;
 
+  /**
+   * Tipo da evidência.
+   */
   tipo: TipoEvidencia;
 
   /**
-   * URL pública ou caminho do arquivo no Supabase Storage.
+   * URL pública ou caminho do arquivo
+   * no Supabase Storage.
+   *
+   * Opcional porque evidências de texto
+   * podem não possuir arquivo.
    */
-  url: string;
+  url?: string;
 
   /**
    * Nome original do arquivo.
@@ -39,7 +51,8 @@ export interface Evidencia {
 
   /**
    * MIME type.
-   * Ex:
+   *
+   * Exemplos:
    * image/jpeg
    * audio/webm
    * application/pdf
@@ -50,6 +63,19 @@ export interface Evidencia {
    * Tamanho do arquivo em bytes.
    */
   tamanho?: number;
+
+  /**
+   * Texto associado à evidência.
+   *
+   * Usado principalmente para evidências
+   * do tipo "texto".
+   */
+  texto?: string;
+
+  /**
+   * Transcrição associada à evidência de áudio.
+   */
+  transcricao?: string;
 
   /**
    * Duração do áudio em segundos.
@@ -96,12 +122,22 @@ export interface TranscricaoAudio {
   timestamp?: string;
 }
 
+/**
+ * Usuário responsável pela vistoria.
+ */
 export interface Vistoriador {
   id: number;
   nome: string;
   funcao: string;
 }
 
+/**
+ * Requisito do checklist.
+ *
+ * IMPORTANTE:
+ * id = UUID interno do banco.
+ * codigo = código funcional, como LAB-01, CME-01 etc.
+ */
 export interface Requisito {
   id: string;
   codigo: string;
@@ -111,9 +147,18 @@ export interface Requisito {
   referencias: string[];
 }
 
+/**
+ * Resposta de um requisito durante a vistoria.
+ */
 export interface Resposta {
+  /**
+   * UUID do requisito relacionado.
+   */
   requisitoId: string;
 
+  /**
+   * Resultado da avaliação.
+   */
   status: StatusAvaliacao;
 
   /**
@@ -122,34 +167,55 @@ export interface Resposta {
   observacao?: string;
 
   /**
-   * Texto produzido pela transcrição de áudio.
+   * Dados da transcrição de áudio.
+   *
+   * Mantido para compatibilidade
+   * com o fluxo atual.
    */
   transcricao?: TranscricaoAudio;
 
   /**
-   * Evidências anexadas ao requisito.
+   * Todas as evidências vinculadas
+   * a este requisito.
+   *
+   * Um requisito pode possuir várias:
+   * - fotos
+   * - arquivos
+   * - áudios
+   * - textos
    */
   evidencias?: Evidencia[];
 
   /**
-   * Mantemos fotos para compatibilidade
-   * com a estrutura atual do sistema.
+   * Mantido para compatibilidade
+   * com a estrutura antiga.
    */
   fotos?: string[];
 
   /**
-   * Mantemos áudio separado para compatibilidade
+   * Mantido para compatibilidade
    * durante a migração da estrutura antiga.
    */
   audioUrl?: string;
 
+  /**
+   * Data/hora da resposta.
+   */
   timestamp: string;
 }
 
+/**
+ * Estado geral da vistoria.
+ */
 export interface VistoriaState {
   local: string;
 
   vistoriador: Vistoriador | null;
 
+  /**
+   * As respostas são indexadas pelo UUID
+   * do requisito.
+   */
   respostas: Record<string, Resposta>;
 }
+```
