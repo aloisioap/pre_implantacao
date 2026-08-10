@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { Check, AlertTriangle, X, Camera, ClipboardCheck, BarChart2, UserPlus, Users, Menu, FileText, Home, ChevronRight, ChevronLeft } from "lucide-react";
+import { Check, AlertTriangle, X, Camera, ClipboardCheck, BarChart2, UserPlus, Users, Menu, FileText, Home, ChevronRight, ChevronLeft, XCircle } from "lucide-react";
 import { checklist } from "@/data/checklist";
 import { StatusAvaliacao, VistoriaState, Vistoriador } from "@/types/vistoria";
 import { supabase } from "./supabaseClient";
@@ -28,6 +28,7 @@ export default function PreImplantacaoApp() {
   // Estados temporários para modais
   const [modalAberto, setModalAberto] = useState<ModalState>(null);
   const [obsTemp, setObsTemp] = useState("");
+  const [fotosTemp, setFotosTemp] = useState<File[]>([]);
   const [novoVistoriador, setNovoVistoriador] = useState({ nome: "", funcao: "" });
 
   // Carregamento inicial
@@ -114,6 +115,19 @@ export default function PreImplantacaoApp() {
     }
   };
 
+  const handleFileSelect = (event: React.ChangeEvent<HTMLInputElement>) => {
+    if (event.target.files) {
+      const files = Array.from(event.target.files);
+      setFotosTemp(prev => [...prev, ...files]);
+      // Limpa o valor do input para permitir selecionar o mesmo arquivo novamente
+      event.target.value = '';
+    }
+  };
+
+  const handleRemoveFoto = (index: number) => {
+    setFotosTemp(prev => prev.filter((_, i) => i !== index));
+  };
+
   const handleStartVistoria = async (startIndex?: number) => {
     if (!vistoria.vistoriador) return;
 
@@ -183,26 +197,62 @@ export default function PreImplantacaoApp() {
   };
 
   // Ação principal de Vistoria
-  const registrarAvaliacao = (status: StatusAvaliacao, observacao: string = "") => {
+  const registrarAvaliacao = async (status: StatusAvaliacao, observacao: string = "") => {
     const requisitoAtual = checklist[currentIndex];
+    if (!activeVistoriaId) {
+      console.error("Não é possível registrar avaliação sem uma vistoria ativa.");
+      // TODO: Adicionar um alerta para o usuário
+      return;
+    }
 
-    const novaResposta = {
+    let urlsFotos: string[] = [];
+
+    // 1. Fazer upload das fotos para o Supabase Storage
+    if (fotosTemp.length > 0) {
+      for (const file of fotosTemp) {
+        const fileExt = file.name.split('.').pop();
+        const filePath = `${activeVistoriaId}/${requisitoAtual.id}/${Date.now()}.${fileExt}`;
+
+        const { error: uploadError } = await supabase.storage
+          .from('fotos_vistorias')
+          .upload(filePath, file);
+
+        if (uploadError) {
+          console.error("Erro no upload da foto:", uploadError);
+          // TODO: Adicionar um alerta para o usuário sobre a falha no upload
+          return; // Interrompe o processo se um upload falhar
+        }
+
+        const { data: urlData } = supabase.storage
+          .from('fotos_vistorias')
+          .getPublicUrl(filePath);
+
+        if (urlData) {
+          urlsFotos.push(urlData.publicUrl);
+        }
+      }
+    }
+
+    // 2. Criar o objeto da resposta com as URLs das fotos
+    const novaResposta: Resposta = {
       requisitoId: requisitoAtual.id,
       status,
       observacao,
+      fotos: urlsFotos,
       timestamp: new Date().toISOString()
     };
 
-    const novasRespostas = {
+    // 3. Atualizar o estado e o banco de dados
+    handleSetVistoria({
+      respostas: {
       ...vistoria.respostas,
       [requisitoAtual.id]: novaResposta
-    };
+    }});
 
-    handleSetVistoria({ respostas: novasRespostas });
-
+    // 4. Limpar estados temporários e navegar
     setModalAberto(null);
     setObsTemp("");
-
+    setFotosTemp([]);
     if (currentIndex < checklist.length - 1) {
       setTimeout(() => setCurrentIndex(prev => prev + 1), 150);
     } else {
@@ -428,6 +478,12 @@ export default function PreImplantacaoApp() {
                             {resposta.observacao && <div className="bg-gray-50 p-3 rounded-lg border border-gray-100 mt-2">
                               <p className="text-sm text-gray-700 italic">&ldquo;{resposta.observacao}&rdquo;</p>
                             </div>}
+                            {resposta.fotos && resposta.fotos.length > 0 && (
+                              <div className="mt-3 flex gap-2 flex-wrap">
+                                {resposta.fotos.map((fotoUrl, index) => (
+                                  <a key={index} href={fotoUrl} target="_blank" rel="noopener noreferrer"><img src={fotoUrl} alt={`Evidência ${index + 1}`} className="w-16 h-16 rounded-lg object-cover border border-gray-200 hover:scale-105 transition-transform" /></a>
+                                ))}
+                            </div>}
                           </div>
                         );
                       })}
@@ -575,19 +631,39 @@ export default function PreImplantacaoApp() {
               onChange={(e) => setObsTemp(e.target.value)}
             />
 
+            {/* Pré-visualização das fotos a serem anexadas */}
+            {fotosTemp.length > 0 && (
+              <div className="mt-2">
+                <p className="text-xs font-bold text-gray-500 mb-2">FOTOS A SEREM ANEXADAS:</p>
+                <div className="flex gap-2 overflow-x-auto pb-2">
+                  {fotosTemp.map((file, index) => (
+                    <div key={index} className="relative shrink-0">
+                      <img src={URL.createObjectURL(file)} alt={`Preview ${index}`} className="w-16 h-16 rounded-lg object-cover" />
+                      <button
+                        onClick={() => handleRemoveFoto(index)}
+                        className="absolute -top-1.5 -right-1.5 bg-acao-naopossui text-white rounded-full p-0"
+                      >
+                        <XCircle size={20} />
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
             <div className="flex gap-3 mt-2">
               <label className="flex-1 py-3 bg-gray-100 text-gray-600 font-bold rounded-xl active:bg-gray-200 transition-colors flex justify-center items-center gap-2 cursor-pointer text-sm">
                 <Camera size={18} /> CÂMERA
-                <input type="file" accept="image/*" capture="environment" className="hidden" />
+                <input type="file" accept="image/*" capture="environment" className="hidden" onChange={handleFileSelect} />
               </label>
               <label className="flex-1 py-3 bg-gray-100 text-gray-600 font-bold rounded-xl active:bg-gray-200 transition-colors flex justify-center items-center gap-2 cursor-pointer text-sm">
                 <BarChart2 size={18} /> GALERIA
-                <input type="file" accept="image/*" className="hidden" />
+                <input type="file" accept="image/*" className="hidden" onChange={handleFileSelect} multiple />
               </label>
 
               <button
-                onClick={() => registrarAvaliacao(modalAberto, obsTemp)}
-                disabled={!obsTemp.trim()}
+                onClick={async () => { if (modalAberto && (modalAberto === 'ressalva' || modalAberto === 'nao_possui')) await registrarAvaliacao(modalAberto, obsTemp); }}
+                disabled={!obsTemp.trim() && fotosTemp.length === 0}
                 className="flex-[2] py-3 bg-vistoria-dark text-white font-bold rounded-xl active:bg-vistoria-blue transition-colors flex justify-center items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed shadow-md"
               >
                 <Check size={20} /> CONCLUIR
