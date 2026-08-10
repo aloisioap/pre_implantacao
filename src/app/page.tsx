@@ -1,13 +1,14 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { Check, AlertTriangle, X, Camera, ChevronLeft, ClipboardCheck, BarChart2, UserPlus, Users, Menu, FileText } from "lucide-react";
+import { Check, AlertTriangle, X, Camera, ClipboardCheck, BarChart2, UserPlus, Users, Menu, FileText, Home, ChevronRight } from "lucide-react";
 import { checklist } from "@/data/checklist";
-import { Resposta, StatusAvaliacao, VistoriaState, Vistoriador } from "@/types/vistoria";
+import { StatusAvaliacao, VistoriaState, Vistoriador } from "@/types/vistoria";
 import { supabase } from "./supabaseClient";
 
 type ViewState = "dashboard" | "vistoria" | "relatorio";
 type ModalState = "ressalva" | "nao_possui" | "novo_usuario" | null;
+type FiltroRelatorio = "todos" | "conforme" | "ressalva" | "nao_possui";
 
 export default function PreImplantacaoApp() {
   const [view, setView] = useState<ViewState>("dashboard");
@@ -22,6 +23,7 @@ export default function PreImplantacaoApp() {
   const [currentIndex, setCurrentIndex] = useState(0);
   const [isLoaded, setIsLoaded] = useState(false);
   const [isMenuOpen, setIsMenuOpen] = useState(false);
+  const [filtroRelatorio, setFiltroRelatorio] = useState<FiltroRelatorio>("todos");
 
   // Estados temporários para modais
   const [modalAberto, setModalAberto] = useState<ModalState>(null);
@@ -35,7 +37,7 @@ export default function PreImplantacaoApp() {
       const { data: vistoriadoresData, error: vistoriadoresError } = await supabase
         .from('vistoriadores')
         .select('id, nome, funcao');
-      
+
       if (vistoriadoresError) {
         console.error("Erro ao buscar vistoriadores:", vistoriadoresError);
       } else {
@@ -50,7 +52,7 @@ export default function PreImplantacaoApp() {
           .select('*, vistoriador:vistoriadores(id, nome, funcao)')
           .eq('id', lastVistoriaId)
           .single();
-        
+
         if (!vistoriaError && vistoriaData) {
           setActiveVistoriaId(vistoriaData.id);
           setVistoria({ local: vistoriaData.local, respostas: vistoriaData.respostas || {}, vistoriador: vistoriaData.vistoriador });
@@ -69,7 +71,7 @@ export default function PreImplantacaoApp() {
       .from('vistorias')
       .update({ ...updates, updated_at: new Date().toISOString() })
       .eq('id', activeVistoriaId);
-    
+
     if (error) console.error("Erro ao salvar vistoria:", error);
   };
 
@@ -104,39 +106,44 @@ export default function PreImplantacaoApp() {
     }
   };
 
-  const handleStartVistoria = async () => {
+  const handleStartVistoria = async (startIndex?: number) => {
     if (!vistoria.vistoriador) return;
 
-    // Se já existe uma vistoria ativa, apenas muda a view
-    if (activeVistoriaId) {
-      setView("vistoria");
-      return;
-    }
+    if (!activeVistoriaId) {
+      // Cria uma nova vistoria no banco
+      const { data, error } = await supabase
+        .from('vistorias')
+        .insert({
+          local: vistoria.local,
+          vistoriador_id: vistoria.vistoriador.id,
+          respostas: {},
+        })
+        .select()
+        .single();
 
-    // Cria uma nova vistoria no banco
-    const { data, error } = await supabase
-      .from('vistorias')
-      .insert({
-        local: vistoria.local,
-        vistoriador_id: vistoria.vistoriador.id,
-        respostas: {},
-      })
-      .select()
-      .single();
-
-    if (error) {
-      console.error("Erro ao iniciar nova vistoria:", error);
-    } else {
+      if (error) {
+        console.error("Erro ao iniciar nova vistoria:", error);
+        return;
+      }
       setActiveVistoriaId(data.id);
       localStorage.setItem('@active-vistoria-id', data.id);
-      setView("vistoria");
     }
+
+    if (startIndex !== undefined) setCurrentIndex(startIndex);
+    setView("vistoria");
   };
-  
+
+  // Abre a vistoria direto no primeiro item pendente da categoria
+  const abrirCategoria = (categoria: string) => {
+    const pendente = checklist.findIndex(r => r.categoria === categoria && !vistoria.respostas[r.id]);
+    const primeiro = checklist.findIndex(r => r.categoria === categoria);
+    handleStartVistoria(pendente !== -1 ? pendente : primeiro);
+  };
+
   // Cálculos dinâmicos
   const totalAvaliados = Object.keys(vistoria.respostas).length;
   const progressoTotal = Math.round((totalAvaliados / checklist.length) * 100) || 0;
-  
+
   const contagem = {
     conforme: Object.values(vistoria.respostas).filter(r => r.status === "conforme").length,
     ressalva: Object.values(vistoria.respostas).filter(r => r.status === "ressalva").length,
@@ -147,12 +154,30 @@ export default function PreImplantacaoApp() {
 
   const categorias = [...new Set(checklist.map(item => item.categoria))];
 
+  const resumoCategorias = categorias.map(cat => {
+    const itens = checklist.filter(i => i.categoria === cat);
+    const status = (s: StatusAvaliacao) => itens.filter(i => vistoria.respostas[i.id]?.status === s).length;
+    return {
+      cat,
+      total: itens.length,
+      feitos: itens.filter(i => vistoria.respostas[i.id]).length,
+      conforme: status("conforme"),
+      ressalva: status("ressalva"),
+      naoPossui: status("nao_possui"),
+    };
+  });
+
   const navigateToRequisito = (id: string) => { const index = checklist.findIndex(r => r.id === id); if (index !== -1) { setCurrentIndex(index); setIsMenuOpen(false); } };
+
+  const handleTabChange = (tab: ViewState) => {
+    if (tab === "vistoria") { handleStartVistoria(); return; }
+    setView(tab);
+  };
 
   // Ação principal de Vistoria
   const registrarAvaliacao = (status: StatusAvaliacao, observacao: string = "") => {
     const requisitoAtual = checklist[currentIndex];
-    
+
     const novaResposta = {
       requisitoId: requisitoAtual.id,
       status,
@@ -166,7 +191,7 @@ export default function PreImplantacaoApp() {
     };
 
     handleSetVistoria({ respostas: novasRespostas });
-    
+
     setModalAberto(null);
     setObsTemp("");
 
@@ -180,6 +205,37 @@ export default function PreImplantacaoApp() {
   if (!isLoaded) return null; // Evita hidratação incorreta
 
   // ==========================================
+  // BARRA DE ABAS (NAVEGAÇÃO PRINCIPAL)
+  // ==========================================
+  const tabs: { id: ViewState; label: string; icon: typeof Home; disabled?: boolean }[] = [
+    { id: "dashboard", label: "Início", icon: Home },
+    { id: "vistoria", label: "Checklist", icon: ClipboardCheck, disabled: !vistoria.vistoriador },
+    { id: "relatorio", label: "Relatório", icon: FileText },
+  ];
+
+  const tabBar = (
+    <nav className="sticky bottom-0 z-20 bg-white/95 backdrop-blur-md border-t border-gray-200 grid grid-cols-3 pb-[env(safe-area-inset-bottom)]">
+      {tabs.map(tab => {
+        const ativo = view === tab.id;
+        const Icon = tab.icon;
+        return (
+          <button
+            key={tab.id}
+            onClick={() => handleTabChange(tab.id)}
+            disabled={tab.disabled}
+            className={`py-2.5 flex flex-col items-center gap-0.5 text-[11px] font-bold transition-colors disabled:opacity-40 ${ativo ? "text-vistoria-dark" : "text-gray-400 active:text-gray-600"}`}
+          >
+            <span className={`px-4 py-1 rounded-full transition-colors ${ativo ? "bg-vistoria-sky/25" : ""}`}>
+              <Icon size={22} strokeWidth={ativo ? 2.5 : 2} />
+            </span>
+            {tab.label}
+          </button>
+        );
+      })}
+    </nav>
+  );
+
+  // ==========================================
   // VIEW: DASHBOARD INICIAL
   // ==========================================
   if (view === "dashboard") {
@@ -188,33 +244,33 @@ export default function PreImplantacaoApp() {
         <div className="bg-vistoria-dark text-white p-6 rounded-b-[2rem] shadow-lg relative overflow-hidden">
           {/* Polígonos decorativos */}
           <div className="absolute top-0 right-0 w-32 h-32 bg-white opacity-5 rotate-45 transform translate-x-10 -translate-y-10"></div>
-          
+
           <h2 className="text-sm font-bold tracking-widest text-vistoria-sky mb-1">PRÉ-IMPLANTAÇÃO</h2>
-          <input 
+          <input
             className="text-3xl font-bold mb-6 bg-transparent outline-none w-full placeholder:text-white"
             value={vistoria.local}
             onChange={(e) => setVistoria(v => ({ ...v, local: e.target.value }))}
             onBlur={() => updateVistoriaInDb({ local: vistoria.local })}
             disabled={!!activeVistoriaId}
           />
-          
+
           <div className="flex items-center gap-4 bg-white/10 p-4 rounded-2xl backdrop-blur-sm border border-white/20">
             <div className="w-16 h-16 rounded-full flex items-center justify-center border-4 border-vistoria-sky relative">
               <span className="text-lg font-bold">{progressoTotal}%</span>
             </div>
             <div>
               <p className="font-medium text-white">{totalAvaliados} de {checklist.length} itens</p>
-              <p className="text-sm text-vistoria-lightest">Vistoria em andamento</p>
+              <p className="text-sm text-vistoria-lightest">{totalAvaliados > 0 ? "Vistoria em andamento" : "Vistoria não iniciada"}</p>
             </div>
           </div>
         </div>
 
-        <div className="p-6 flex flex-col gap-6 flex-1">
+        <div className="p-6 flex flex-col gap-6 flex-1 overflow-y-auto">
           {/* SELETOR DE VISTORIADOR */}
           <div className="flex flex-col gap-2">
             <label className="text-sm font-bold text-gray-600 flex items-center gap-2"><Users size={16}/> Vistoriador Responsável</label>
             <div className="flex gap-2">
-              <select 
+              <select
                 className="flex-1 bg-white border border-gray-200 rounded-lg px-3 py-2 text-gray-800"
                 value={vistoria.vistoriador?.id || ""}
                 onChange={(e) => {
@@ -232,9 +288,8 @@ export default function PreImplantacaoApp() {
             {!vistoria.vistoriador && isLoaded && <p className="text-xs text-red-500">Selecione ou cadastre um vistoriador.</p>}
           </div>
 
-
           {/* MÉTRICAS */}
-          <div className="grid grid-cols-3 gap-3 mb-4">
+          <div className="grid grid-cols-3 gap-3">
             <div className="bg-white p-3 rounded-xl border border-gray-100 shadow-sm text-center">
               <span className="block text-2xl font-bold text-acao-conforme">{contagem.conforme}</span>
               <span className="text-xs font-bold text-gray-500">Conformes</span>
@@ -249,23 +304,54 @@ export default function PreImplantacaoApp() {
             </div>
           </div>
 
-          <button 
-            onClick={handleStartVistoria}
+          {/* PROGRESSO POR TÓPICO */}
+          <div className="flex flex-col gap-2">
+            <h3 className="text-sm font-bold text-gray-600 uppercase tracking-wider">Progresso por Tópico</h3>
+            <div className="flex flex-col gap-2">
+              {resumoCategorias.map(({ cat, total, feitos, conforme, ressalva, naoPossui }) => {
+                const completo = feitos === total;
+                return (
+                  <button
+                    key={cat}
+                    onClick={() => abrirCategoria(cat)}
+                    disabled={!vistoria.vistoriador}
+                    className="bg-white p-4 rounded-xl border border-gray-100 shadow-sm text-left active:bg-gray-50 transition-colors disabled:opacity-60 flex items-center gap-3"
+                  >
+                    <div className="flex-1 min-w-0">
+                      <div className="flex justify-between items-baseline gap-2 mb-2">
+                        <span className="font-bold text-sm text-slate-800 truncate">{cat}</span>
+                        <span className={`text-xs font-bold shrink-0 ${completo ? "text-acao-conforme" : "text-gray-400"}`}>{feitos}/{total}</span>
+                      </div>
+                      <div className="w-full bg-gray-100 h-1.5 rounded-full overflow-hidden flex">
+                        <div className="bg-acao-conforme h-full" style={{ width: `${(conforme / total) * 100}%` }} />
+                        <div className="bg-acao-ressalva h-full" style={{ width: `${(ressalva / total) * 100}%` }} />
+                        <div className="bg-acao-naopossui h-full" style={{ width: `${(naoPossui / total) * 100}%` }} />
+                      </div>
+                      {(ressalva > 0 || naoPossui > 0) && (
+                        <div className="flex gap-3 mt-2 text-[11px] font-bold">
+                          {ressalva > 0 && <span className="text-acao-ressalva">{ressalva} ressalva{ressalva > 1 ? "s" : ""}</span>}
+                          {naoPossui > 0 && <span className="text-acao-naopossui">{naoPossui} não possui</span>}
+                        </div>
+                      )}
+                    </div>
+                    <ChevronRight size={18} className="text-gray-300 shrink-0" />
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+
+          <button
+            onClick={() => handleStartVistoria()}
             disabled={!vistoria.vistoriador}
-            className="w-full py-4 bg-vistoria-blue text-white rounded-2xl font-bold text-lg shadow-[0_4px_0_0_#3e9fbc] active:translate-y-1 active:shadow-none transition-all flex justify-center items-center gap-2"
+            className="w-full py-4 bg-vistoria-blue text-white rounded-2xl font-bold text-lg shadow-[0_4px_0_0_#3e9fbc] active:translate-y-1 active:shadow-none transition-all flex justify-center items-center gap-2 disabled:opacity-60"
           >
             <ClipboardCheck size={24} />
             {totalAvaliados > 0 ? "CONTINUAR VISTORIA" : "INICIAR VISTORIA"}
           </button>
-
-          <button 
-            onClick={() => setView("relatorio")}
-            className="w-full py-4 bg-white text-vistoria-dark border-2 border-vistoria-teal rounded-2xl font-bold text-lg active:bg-gray-light transition-all flex justify-center items-center gap-2"
-          >
-            <FileText size={22} />
-            RELATÓRIO ({todasAsRespostas.length})
-          </button>
         </div>
+
+        {tabBar}
       </main>
     );
   }
@@ -274,48 +360,78 @@ export default function PreImplantacaoApp() {
   // VIEW: RELATÓRIO DA VISTORIA
   // ==========================================
   if (view === "relatorio") {
+    const filtros: { id: FiltroRelatorio; label: string; cor: string }[] = [
+      { id: "todos", label: `Todos (${todasAsRespostas.length})`, cor: "bg-vistoria-dark text-white" },
+      { id: "conforme", label: `Conformes (${contagem.conforme})`, cor: "bg-acao-conforme text-white" },
+      { id: "ressalva", label: `Ressalvas (${contagem.ressalva})`, cor: "bg-acao-ressalva text-white" },
+      { id: "nao_possui", label: `Não Possui (${contagem.naopossui})`, cor: "bg-acao-naopossui text-white" },
+    ];
+
+    const respostasFiltradas = todasAsRespostas.filter(r => filtroRelatorio === "todos" || r.status === filtroRelatorio);
+
+    const statusColors: Record<string, string> = {
+      conforme: 'border-acao-conforme',
+      ressalva: 'border-acao-ressalva',
+      nao_possui: 'border-acao-naopossui',
+      nao_avaliado: 'border-gray-200',
+    };
+
     return (
       <main className="max-w-md mx-auto min-h-screen bg-white shadow-2xl flex flex-col">
-        <header className="p-4 border-b border-gray-100 flex items-center gap-4 sticky top-0 bg-white/90 backdrop-blur-md z-10">
-          <button onClick={() => setView("dashboard")} className="p-2 bg-gray-100 rounded-full active:bg-gray-200">
-            <ChevronLeft size={20} className="text-gray-700" />
-          </button>
+        <header className="p-4 border-b border-gray-100 sticky top-0 bg-white/90 backdrop-blur-md z-10 flex flex-col gap-3">
           <div>
             <h1 className="text-xl font-bold text-vistoria-dark">Relatório da Vistoria</h1>
-            <p className="text-xs text-gray-500">{vistoria.local}</p>
+            <p className="text-xs text-gray-500">{vistoria.local}{vistoria.vistoriador ? ` • ${vistoria.vistoriador.nome}` : ""}</p>
+          </div>
+          <div className="flex gap-2 overflow-x-auto -mx-4 px-4 pb-1">
+            {filtros.map(f => (
+              <button
+                key={f.id}
+                onClick={() => setFiltroRelatorio(f.id)}
+                className={`shrink-0 px-3 py-1.5 rounded-full text-xs font-bold transition-colors ${filtroRelatorio === f.id ? f.cor : "bg-gray-100 text-gray-500 active:bg-gray-200"}`}
+              >
+                {f.label}
+              </button>
+            ))}
           </div>
         </header>
-        
+
         <div className="p-4 flex-1 overflow-y-auto bg-gray-light">
-          {todasAsRespostas.length === 0 ? (
-            <p className="text-center text-gray-500 mt-10">Nenhum item foi avaliado ainda.</p>
+          {respostasFiltradas.length === 0 ? (
+            <p className="text-center text-gray-500 mt-10">Nenhum item avaliado {filtroRelatorio !== "todos" ? "com este status" : "ainda"}.</p>
           ) : (
-            <div className="flex flex-col gap-4">
-              {todasAsRespostas.map(resposta => {
-                const req = checklist.find(r => r.id === resposta.requisitoId);
-                if (!req) return null;
-                const statusColors = {
-                  conforme: 'border-acao-conforme',
-                  ressalva: 'border-acao-ressalva',
-                  nao_possui: 'border-acao-naopossui',
-                  nao_avaliado: 'border-gray-200', // Adicionado para cobrir todos os StatusAvaliacao
-                };
+            <div className="flex flex-col gap-5">
+              {categorias.map(cat => {
+                const itensDaCategoria = checklist.filter(req => req.categoria === cat && respostasFiltradas.some(r => r.requisitoId === req.id));
+                if (itensDaCategoria.length === 0) return null;
                 return (
-                  <div key={resposta.requisitoId} className={`bg-white p-4 rounded-xl shadow-sm border ${statusColors[resposta.status] || 'border-gray-200'} border-l-4`}>
-                    <div className="flex justify-between items-start mb-2">
-                      <span className="text-xs font-bold bg-gray-100 px-2 py-1 rounded text-gray-600">{req.codigo}</span>
-                      <span className="text-xs font-bold uppercase tracking-wider text-gray-400">{req.criticidade}</span>
+                  <section key={cat}>
+                    <h3 className="text-xs font-bold text-gray-500 uppercase tracking-wider mb-2 px-1">{cat}</h3>
+                    <div className="flex flex-col gap-3">
+                      {itensDaCategoria.map(req => {
+                        const resposta = vistoria.respostas[req.id];
+                        return (
+                          <div key={req.id} className={`bg-white p-4 rounded-xl shadow-sm border ${statusColors[resposta.status] || 'border-gray-200'} border-l-4`}>
+                            <div className="flex justify-between items-start mb-2">
+                              <span className="text-xs font-bold bg-gray-100 px-2 py-1 rounded text-gray-600">{req.codigo}</span>
+                              <span className="text-xs font-bold uppercase tracking-wider text-gray-400">{req.criticidade}</span>
+                            </div>
+                            <p className="font-bold text-gray-800 mb-2">{req.pergunta}</p>
+                            {resposta.observacao && <div className="bg-gray-50 p-3 rounded-lg border border-gray-100 mt-2">
+                              <p className="text-sm text-gray-700 italic">&ldquo;{resposta.observacao}&rdquo;</p>
+                            </div>}
+                          </div>
+                        );
+                      })}
                     </div>
-                    <p className="font-bold text-gray-800 mb-2">{req.pergunta}</p>
-                    {resposta.observacao && <div className="bg-gray-50 p-3 rounded-lg border border-gray-100 mt-2">
-                      <p className="text-sm text-gray-700 italic">"{resposta.observacao}"</p>
-                    </div>}
-                  </div>
-                )
+                  </section>
+                );
               })}
             </div>
           )}
         </div>
+
+        {tabBar}
       </main>
     );
   }
@@ -330,7 +446,7 @@ export default function PreImplantacaoApp() {
     setView("dashboard");
     return null;
   }
-  
+
   return (
     <main className="max-w-md mx-auto min-h-screen bg-white shadow-2xl flex flex-col relative overflow-hidden">
       {/* CABEÇALHO DA VISTORIA */}
@@ -344,9 +460,9 @@ export default function PreImplantacaoApp() {
             {currentIndex + 1} / {checklist.length}
           </span>
         </div>
-        
+
         <div className="w-full bg-gray-100 h-1.5 rounded-full overflow-hidden">
-          <div 
+          <div
             className="bg-vistoria-teal h-full transition-all duration-300"
             style={{ width: `${((currentIndex) / checklist.length) * 100}%` }}
           />
@@ -354,7 +470,7 @@ export default function PreImplantacaoApp() {
       </header>
 
       {/* CORPO DA VISTORIA */}
-      <section className="flex-1 px-6 pt-4 pb-8 flex flex-col">
+      <section className="flex-1 px-6 pt-4 pb-6 flex flex-col">
         <span className="text-xs font-bold text-gray-400 uppercase tracking-wider mb-2">
           {requisitoAtual.categoria} • {requisitoAtual.codigo}
         </span>
@@ -364,21 +480,21 @@ export default function PreImplantacaoApp() {
 
         {/* CONTROLES DE CAMPO (3 BOTÕES GIGANTES) */}
         <div className="mt-auto flex flex-col gap-3">
-          <button 
+          <button
             onClick={() => registrarAvaliacao("conforme")}
             className="w-full py-6 bg-acao-conforme text-white text-xl font-bold rounded-2xl shadow-sm active:scale-[0.98] transition-transform flex items-center justify-center gap-3"
           >
             <Check size={28} /> CONFORME
           </button>
 
-          <button 
+          <button
             onClick={() => setModalAberto("ressalva")}
             className="w-full py-5 bg-white text-acao-ressalva border-2 border-acao-ressalva text-lg font-bold rounded-2xl active:bg-yellow-50 transition-colors flex items-center justify-center gap-3"
           >
             <AlertTriangle size={24} /> RESSALVA
           </button>
 
-          <button 
+          <button
             onClick={() => setModalAberto("nao_possui")}
             className="w-full py-5 bg-white text-acao-naopossui border-2 border-acao-naopossui text-lg font-bold rounded-2xl active:bg-red-50 transition-colors flex items-center justify-center gap-3"
           >
@@ -386,6 +502,8 @@ export default function PreImplantacaoApp() {
           </button>
         </div>
       </section>
+
+      {tabBar}
 
       {/* MENU LATERAL DE NAVEGAÇÃO */}
       {isMenuOpen && (
@@ -425,14 +543,14 @@ export default function PreImplantacaoApp() {
         <div className="absolute inset-0 z-50 flex flex-col justify-end">
           <div className="absolute inset-0 bg-slate-900/40 backdrop-blur-sm" onClick={() => setModalAberto(null)} />
           <div className="bg-white rounded-t-[2rem] p-6 pb-10 z-10 flex flex-col gap-4 animate-in slide-in-from-bottom-8 duration-200 shadow-[0_-10px_40px_rgba(0,0,0,0.1)] border-t border-gray-100">
-            
+
             <div className="w-12 h-1.5 bg-gray-200 rounded-full mx-auto mb-2" />
-            
+
             <h3 className={`font-bold text-lg flex items-center gap-2 ${modalAberto === 'ressalva' ? 'text-acao-ressalva' : 'text-acao-naopossui'}`}>
               {modalAberto === 'ressalva' ? <><AlertTriangle/> REGISTRAR RESSALVA</> : <><X/> NÃO POSSUI</>}
             </h3>
-            
-            <textarea 
+
+            <textarea
               autoFocus
               className="w-full bg-gray-50 border border-gray-200 p-4 rounded-xl outline-none focus:ring-2 focus:ring-vistoria-blue resize-none h-28 text-slate-700"
               placeholder="Descreva a situação encontrada..."
@@ -449,8 +567,8 @@ export default function PreImplantacaoApp() {
                 <BarChart2 size={18} /> GALERIA
                 <input type="file" accept="image/*" className="hidden" />
               </label>
-              
-              <button 
+
+              <button
                 onClick={() => registrarAvaliacao(modalAberto, obsTemp)}
                 disabled={!obsTemp.trim()}
                 className="flex-[2] py-3 bg-vistoria-dark text-white font-bold rounded-xl active:bg-vistoria-blue transition-colors flex justify-center items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed shadow-md"
@@ -470,8 +588,8 @@ export default function PreImplantacaoApp() {
             <h3 className="font-bold text-lg flex items-center gap-2 text-vistoria-dark">
               <UserPlus /> Novo Vistoriador
             </h3>
-            
-            <input 
+
+            <input
               type="text"
               autoFocus
               className="w-full bg-gray-50 border border-gray-200 p-3 rounded-lg outline-none focus:ring-2 focus:ring-vistoria-blue text-slate-700"
@@ -479,7 +597,7 @@ export default function PreImplantacaoApp() {
               value={novoVistoriador.nome}
               onChange={(e) => setNovoVistoriador(v => ({ ...v, nome: e.target.value }))}
             />
-            <input 
+            <input
               type="text"
               className="w-full bg-gray-50 border border-gray-200 p-3 rounded-lg outline-none focus:ring-2 focus:ring-vistoria-blue text-slate-700"
               placeholder="Função (ex: Engenheiro, Técnico)"
