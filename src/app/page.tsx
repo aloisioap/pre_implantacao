@@ -196,6 +196,38 @@ export default function PreImplantacaoApp() {
     setView(tab);
   };
 
+  const topicListNav = (
+    <nav className="w-full h-full bg-gray-light flex flex-col shadow-2xl lg:rounded-2xl">
+      <header className="p-4 border-b border-gray-200 flex justify-between items-center">
+        <h2 className="text-lg font-bold text-vistoria-dark">Tópicos</h2>
+        <button onClick={() => setView('dashboard')} className="p-2 bg-gray-200 rounded-full active:bg-gray-300 transition-colors" title="Voltar ao Início">
+          <Home size={18} className="text-vistoria-dark" />
+        </button>
+      </header>
+      <ul className="flex-1 overflow-y-auto">
+        {categorias.map(cat => (
+          <li key={cat}>
+            <h3 className="px-4 py-2 text-sm font-bold text-gray-500 bg-gray-100 border-b border-t border-gray-200">{cat}</h3>
+            <ul>
+              {checklist.filter(r => r.categoria === cat).map(req => {
+                const resposta = vistoria.respostas[req.id];
+                const isCurrent = req.id === requisitoAtual.id;
+                return (
+                  <li key={req.id}>
+                    <button onClick={() => navigateToRequisito(req.id)} className={`w-full text-left px-4 py-3 text-sm flex items-center gap-3 ${isCurrent ? 'bg-vistoria-sky/20' : 'hover:bg-gray-200'}`}>
+                      {resposta ? <Check size={16} className="text-acao-conforme flex-shrink-0" /> : <div className="w-4 h-4 rounded-full border-2 border-gray-300 flex-shrink-0" />}
+                      <span className="flex-1">{req.pergunta}</span>
+                    </button>
+                  </li>
+                )
+              })}
+            </ul>
+          </li>
+        ))}
+      </ul>
+    </nav>
+  );
+
   // Ação principal de Vistoria
   const registrarAvaliacao = async (status: StatusAvaliacao, observacao: string = "") => {
     const requisitoAtual = checklist[currentIndex];
@@ -298,8 +330,10 @@ export default function PreImplantacaoApp() {
   // ==========================================
   if (view === "dashboard") {
     return (
-      <main className="max-w-md mx-auto min-h-screen bg-gray-light flex flex-col relative shadow-2xl">
-        <div className="bg-vistoria-dark text-white p-6 rounded-b-[2rem] shadow-lg relative overflow-hidden">
+      <main className="max-w-6xl w-full mx-auto p-0 lg:p-8">
+        <div className="lg:grid lg:grid-cols-5 lg:gap-8">
+          {/* Coluna da Esquerda: Informações e Ações */}
+          <div className="lg:col-span-2 flex flex-col gap-6">
           {/* Polígonos decorativos */}
           <div className="absolute top-0 right-0 w-32 h-32 bg-white opacity-5 rotate-45 transform translate-x-10 -translate-y-10"></div>
 
@@ -322,10 +356,8 @@ export default function PreImplantacaoApp() {
             </div>
           </div>
         </div>
-
-        <div className="p-6 flex flex-col gap-6 flex-1 overflow-y-auto">
           {/* SELETOR DE VISTORIADOR */}
-          <div className="flex flex-col gap-2">
+          <div className="flex flex-col gap-2 p-6 lg:p-4 bg-white lg:rounded-2xl lg:shadow-sm">
             <label className="text-sm font-bold text-gray-600 flex items-center gap-2"><Users size={16}/> Vistoriador Responsável</label>
             <div className="flex gap-2">
               <select
@@ -347,7 +379,7 @@ export default function PreImplantacaoApp() {
           </div>
 
           {/* MÉTRICAS */}
-          <div className="grid grid-cols-3 gap-3">
+          <div className="grid grid-cols-3 gap-3 px-6 lg:px-0">
             <div className="bg-white p-3 rounded-xl border border-gray-100 shadow-sm text-center">
               <span className="block text-2xl font-bold text-acao-conforme">{contagem.conforme}</span>
               <span className="text-xs font-bold text-gray-500">Conformes</span>
@@ -361,10 +393,12 @@ export default function PreImplantacaoApp() {
               <span className="text-xs font-bold text-gray-500">Não Possui</span>
             </div>
           </div>
+          </div>
 
+          {/* Coluna da Direita: Progresso por Tópico */}
+          <div className="p-6 lg:p-0 lg:col-span-3 flex flex-col gap-2">
           {/* PROGRESSO POR TÓPICO */}
-          <div className="flex flex-col gap-2">
-            <h3 className="text-sm font-bold text-gray-600 uppercase tracking-wider">Progresso por Tópico</h3>
+            <h3 className="text-sm font-bold text-gray-600 uppercase tracking-wider px-1">Progresso por Tópico</h3>
             <div className="flex flex-col gap-2">
               {resumoCategorias.map(({ cat, total, feitos, conforme, ressalva, naoPossui }) => {
                 const completo = feitos === total;
@@ -398,18 +432,21 @@ export default function PreImplantacaoApp() {
               })}
             </div>
           </div>
-
-          <button
-            onClick={() => handleStartVistoria()}
-            disabled={!vistoria.vistoriador}
-            className="w-full py-4 bg-vistoria-blue text-white rounded-2xl font-bold text-lg shadow-[0_4px_0_0_#3e9fbc] active:translate-y-1 active:shadow-none transition-all flex justify-center items-center gap-2 disabled:opacity-60"
-          >
-            <ClipboardCheck size={24} />
-            {totalAvaliados > 0 ? "CONTINUAR VISTORIA" : "INICIAR VISTORIA"}
-          </button>
         </div>
 
-        {tabBar}
+        {/* Ações principais (visível apenas em mobile) */}
+        <div className="p-6 lg:hidden">
+            <button
+              onClick={() => handleStartVistoria()}
+              disabled={!vistoria.vistoriador}
+              className="w-full py-4 bg-vistoria-blue text-white rounded-2xl font-bold text-lg shadow-[0_4px_0_0_#3e9fbc] active:translate-y-1 active:shadow-none transition-all flex justify-center items-center gap-2 disabled:opacity-60"
+            >
+              <ClipboardCheck size={24} />
+              {totalAvaliados > 0 ? "CONTINUAR VISTORIA" : "INICIAR VISTORIA"}
+            </button>
+        </div>
+
+        <div className="lg:hidden">{tabBar}</div>
       </main>
     );
   }
@@ -435,7 +472,7 @@ export default function PreImplantacaoApp() {
     };
 
     return (
-      <main className="max-w-md mx-auto min-h-screen bg-white shadow-2xl flex flex-col">
+      <main className="max-w-4xl mx-auto w-full min-h-screen bg-white shadow-2xl flex flex-col">
         <header className="p-4 border-b border-gray-100 sticky top-0 bg-white/90 backdrop-blur-md z-10 flex flex-col gap-3">
           <div>
             <h1 className="text-xl font-bold text-vistoria-dark">Relatório da Vistoria</h1>
@@ -495,7 +532,7 @@ export default function PreImplantacaoApp() {
           )}
         </div>
 
-        {tabBar}
+        <div className="lg:hidden">{tabBar}</div>
       </main>
     );
   }
@@ -512,8 +549,9 @@ export default function PreImplantacaoApp() {
   }
 
   return (
-    <main className="max-w-md mx-auto min-h-screen bg-white shadow-2xl flex flex-col relative overflow-hidden">
+    <main className="max-w-7xl mx-auto w-full lg:grid lg:grid-cols-3 lg:gap-8 lg:py-12">
       {/* CABEÇALHO DA VISTORIA */}
+      <div className="lg:col-span-2 bg-white shadow-2xl min-h-screen flex flex-col relative overflow-hidden lg:min-h-0 lg:rounded-2xl">
       <header className="p-4 flex flex-col gap-3">
         <div className="flex justify-between items-center">
           <button onClick={() => setView("dashboard")} className="p-2 -ml-2 text-gray-500 hover:text-gray-700">
@@ -566,48 +604,24 @@ export default function PreImplantacaoApp() {
           </button>
         </div>
       </section>
+      </div>
 
       {/* Botão flutuante para abrir o menu de tópicos */}
       <button
         onClick={() => setIsMenuOpen(true)}
-        className="fixed top-1/2 -translate-y-1/2 left-0 z-30 bg-white/80 backdrop-blur-sm pl-1 pr-2 py-3 rounded-r-lg shadow-lg border-y border-r border-gray-200 active:bg-gray-100 transition-colors"
+        className="fixed top-1/2 -translate-y-1/2 left-0 z-30 bg-white/80 backdrop-blur-sm pl-1 pr-2 py-3 rounded-r-lg shadow-lg border-y border-r border-gray-200 active:bg-gray-100 transition-colors lg:hidden"
       >
         <Menu size={22} className="text-vistoria-dark" />
       </button>
 
       {/* MENU LATERAL DE NAVEGAÇÃO */}
+      <div className="hidden lg:block lg:col-span-1">
+        {topicListNav}
+      </div>
       {isMenuOpen && (
-        <div className="absolute inset-0 z-50 flex">
+        <div className="absolute inset-0 z-50 flex lg:hidden">
           <div className="absolute inset-0 bg-slate-900/40 backdrop-blur-sm" onClick={() => setIsMenuOpen(false)} />
-          <nav className="w-4/5 max-w-sm h-full bg-gray-light flex flex-col animate-in slide-in-from-left-12 duration-300 shadow-2xl">
-            <header className="p-4 border-b border-gray-200 flex justify-between items-center">
-              <h2 className="text-lg font-bold text-vistoria-dark">Tópicos</h2>
-              <button onClick={() => setView('dashboard')} className="p-2 bg-gray-200 rounded-full active:bg-gray-300 transition-colors" title="Voltar ao Início">
-                <Home size={18} className="text-vistoria-dark" />
-              </button>
-            </header>
-            <ul className="flex-1 overflow-y-auto">
-              {categorias.map(cat => (
-                <li key={cat}>
-                  <h3 className="px-4 py-2 text-sm font-bold text-gray-500 bg-gray-100 border-b border-t border-gray-200">{cat}</h3>
-                  <ul>
-                    {checklist.filter(r => r.categoria === cat).map(req => {
-                      const resposta = vistoria.respostas[req.id];
-                      const isCurrent = req.id === requisitoAtual.id;
-                      return (
-                        <li key={req.id}>
-                          <button onClick={() => navigateToRequisito(req.id)} className={`w-full text-left px-4 py-3 text-sm flex items-center gap-3 ${isCurrent ? 'bg-vistoria-sky/20' : 'hover:bg-gray-200'}`}>
-                            {resposta ? <Check size={16} className="text-acao-conforme flex-shrink-0" /> : <div className="w-4 h-4 rounded-full border-2 border-gray-300 flex-shrink-0" />}
-                            <span className="flex-1">{req.pergunta}</span>
-                          </button>
-                        </li>
-                      )
-                    })}
-                  </ul>
-                </li>
-              ))}
-            </ul>
-          </nav>
+          <div className="w-4/5 max-w-sm h-full animate-in slide-in-from-left-12 duration-300">{topicListNav}</div>
         </div>
       )}
 
