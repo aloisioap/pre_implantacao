@@ -1342,7 +1342,7 @@ export default function PreImplantacaoApp() {
                 color: COLORS.dark,
               }}
             >
-              AUMED • ENGENHARIA CLÍNICA
+              ENGENHARIA CLÍNICA
             </p>
 
             <h1 className="text-2xl lg:text-4xl font-black tracking-tight mt-1">
@@ -2386,7 +2386,7 @@ export default function PreImplantacaoApp() {
                       COLORS.dark,
                   }}
                 >
-                  AUMED • PRÉ-IMPLANTAÇÃO
+                  CHECKLIST DE PRÉ-IMPLANTAÇÃO
                 </p>
 
                 <h1 className="text-xl font-black text-slate-700">
