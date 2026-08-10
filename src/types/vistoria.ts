@@ -30,8 +30,6 @@ export interface Resposta {
   status: StatusAvaliacao;
   observacao?: string;
   fotos?: string[];
-  audio?: string;
-  transcricao?: string;
   timestamp: string;
 }
 
