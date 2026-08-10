@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState, type ChangeEvent } from "react";
 import {
   AlertTriangle,
   ArrowLeft,
@@ -16,6 +16,8 @@ import {
   Home,
   Image as ImageIcon,
   Menu,
+  Mic,
+  Paperclip,
   Plus,
   UserPlus,
   Users,
@@ -50,6 +52,9 @@ type Resposta = {
   status: StatusAvaliacao;
   observacao: string;
   fotos: string[];
+  arquivos?: string[];
+  audios?: string[];
+  transcricao?: string;
   timestamp: string;
 };
 
@@ -122,6 +127,16 @@ export default function PreImplantacaoApp() {
   const [obsTemp, setObsTemp] = useState("");
 
   const [fotosTemp, setFotosTemp] = useState<File[]>([]);
+
+  // Evidências por requisito — a vistoria agora é contínua/rolável.
+  const [evidenciasTemp, setEvidenciasTemp] = useState<Record<string, File[]>>({});
+  const [observacoesTemp, setObservacoesTemp] = useState<Record<string, string>>({});
+  const [gravandoAudio, setGravandoAudio] = useState<string | null>(null);
+  const [audiosTemp, setAudiosTemp] = useState<Record<string, Blob | null>>({});
+  const [transcricoesTemp, setTranscricoesTemp] = useState<Record<string, string>>({});
+  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
+  const audioChunksRef = useRef<Blob[]>([]);
+  const recognitionRef = useRef<any>(null);
 
   const [novoVistoriador, setNovoVistoriador] = useState({
     nome: "",
@@ -376,28 +391,134 @@ export default function PreImplantacaoApp() {
   };
 
   /* =======================================================
-     ARQUIVOS
+     EVIDÊNCIAS — FOTO / ARQUIVO / ÁUDIO / TEXTO
   ======================================================= */
 
   const handleFileSelect = (
-    event: React.ChangeEvent<HTMLInputElement>
+    event: ChangeEvent<HTMLInputElement>,
+    requisitoId?: string
   ) => {
     if (!event.target.files) return;
-
     const files = Array.from(event.target.files);
+    const id = requisitoId ?? checklist[currentIndex]?.id;
+    if (!id) return;
 
-    setFotosTemp((prev) => [
+    setEvidenciasTemp((prev) => ({
       ...prev,
-      ...files,
-    ]);
+      [id]: [...(prev[id] || []), ...files],
+    }));
 
     event.target.value = "";
   };
 
-  const handleRemoveFoto = (index: number) => {
-    setFotosTemp((prev) =>
-      prev.filter((_, i) => i !== index)
-    );
+  const handleRemoveEvidence = (requisitoId: string, index: number) => {
+    setEvidenciasTemp((prev) => ({
+      ...prev,
+      [requisitoId]: (prev[requisitoId] || []).filter((_, i) => i !== index),
+    }));
+  };
+
+  const startVoiceRecognition = (requisitoId: string) => {
+    if (typeof window === "undefined") return;
+
+    const SpeechRecognitionCtor =
+      (window as any).SpeechRecognition ||
+      (window as any).webkitSpeechRecognition;
+
+    if (!SpeechRecognitionCtor) return;
+
+    const recognition = new SpeechRecognitionCtor();
+    recognition.lang = "pt-BR";
+    recognition.continuous = true;
+    recognition.interimResults = true;
+
+    recognition.onresult = (event: any) => {
+      let textoFinal = "";
+      for (let i = event.resultIndex; i < event.results.length; i += 1) {
+        textoFinal += event.results[i][0].transcript;
+      }
+
+      if (textoFinal.trim()) {
+        setTranscricoesTemp((prev) => ({
+          ...prev,
+          [requisitoId]: `${prev[requisitoId] ? `${prev[requisitoId]} ` : ""}${textoFinal.trim()}`.trim(),
+        }));
+      }
+    };
+
+    recognition.onerror = (event: any) => {
+      console.warn("Reconhecimento de voz:", event?.error);
+    };
+
+    recognitionRef.current = recognition;
+    recognition.start();
+  };
+
+  const stopVoiceRecognition = () => {
+    try {
+      recognitionRef.current?.stop?.();
+    } catch {
+      // navegador pode lançar se o reconhecimento já estiver parado
+    }
+    recognitionRef.current = null;
+  };
+
+  const toggleAudioRecording = async (requisitoId: string) => {
+    if (gravandoAudio === requisitoId) {
+      mediaRecorderRef.current?.stop();
+      stopVoiceRecognition();
+      setGravandoAudio(null);
+      return;
+    }
+
+    if (gravandoAudio) return;
+
+    if (!navigator.mediaDevices?.getUserMedia) {
+      alert("Este navegador não oferece gravação de áudio.");
+      return;
+    }
+
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const recorder = new MediaRecorder(stream);
+      audioChunksRef.current = [];
+
+      recorder.ondataavailable = (event) => {
+        if (event.data.size > 0) audioChunksRef.current.push(event.data);
+      };
+
+      recorder.onstop = () => {
+        const blob = new Blob(audioChunksRef.current, { type: recorder.mimeType || "audio/webm" });
+        setAudiosTemp((prev) => ({ ...prev, [requisitoId]: blob }));
+        stream.getTracks().forEach((track) => track.stop());
+      };
+
+      mediaRecorderRef.current = recorder;
+      recorder.start();
+      setGravandoAudio(requisitoId);
+      startVoiceRecognition(requisitoId);
+    } catch (error) {
+      console.error("Erro ao iniciar gravação:", error);
+      alert("Não foi possível acessar o microfone. Verifique a permissão do navegador.");
+    }
+  };
+
+  const limparEvidenciasTemporarias = (requisitoId: string) => {
+    setEvidenciasTemp((prev) => {
+      const next = { ...prev };
+      delete next[requisitoId];
+      return next;
+    });
+    setAudiosTemp((prev) => {
+      const next = { ...prev };
+      delete next[requisitoId];
+      return next;
+    });
+    setTranscricoesTemp((prev) => {
+      const next = { ...prev };
+      delete next[requisitoId];
+      return next;
+    });
   };
 
   /* =======================================================
@@ -593,37 +714,32 @@ export default function PreImplantacaoApp() {
      NAVEGAÇÃO DO CHECKLIST
   ======================================================= */
 
-  const navigateToRequisito = (
-    id: string
-  ) => {
-    const index =
-      checklist.findIndex(
-        (item) => item.id === id
-      );
-
-    if (index !== -1) {
-      setCurrentIndex(index);
-      setIsMenuOpen(false);
-    }
+  const navigateToRequisito = (id: string) => {
+    const index = checklist.findIndex((item) => item.id === id);
+    if (index === -1) return;
+    setCurrentIndex(index);
+    setIsMenuOpen(false);
+    requestAnimationFrame(() => {
+      document.getElementById(`requisito-${id}`)?.scrollIntoView({ behavior: "smooth", block: "center" });
+    });
   };
 
   const goPrevious = () => {
-    if (currentIndex > 0) {
-      setCurrentIndex(
-        (prev) => prev - 1
-      );
-    }
+    if (currentIndex <= 0) return;
+    const nextIndex = currentIndex - 1;
+    setCurrentIndex(nextIndex);
+    requestAnimationFrame(() => {
+      document.getElementById(`requisito-${checklist[nextIndex].id}`)?.scrollIntoView({ behavior: "smooth", block: "center" });
+    });
   };
 
   const goNext = () => {
-    if (
-      currentIndex <
-      checklist.length - 1
-    ) {
-      setCurrentIndex(
-        (prev) => prev + 1
-      );
-    }
+    if (currentIndex >= checklist.length - 1) return;
+    const nextIndex = currentIndex + 1;
+    setCurrentIndex(nextIndex);
+    requestAnimationFrame(() => {
+      document.getElementById(`requisito-${checklist[nextIndex].id}`)?.scrollIntoView({ behavior: "smooth", block: "center" });
+    });
   };
 
   const handleTabChange = (
@@ -638,152 +754,112 @@ export default function PreImplantacaoApp() {
   };
 
   /* =======================================================
-     REGISTRAR AVALIAÇÃO
+     REGISTRAR / ATUALIZAR REQUISITO
   ======================================================= */
 
   const registrarAvaliacao = async (
-    status: StatusAvaliacao,
-    observacao = ""
+    requisitoId: string,
+    status: StatusAvaliacao
   ) => {
-    const requisitoAtual =
-      checklist[currentIndex];
-
-    if (!requisitoAtual) {
-      return;
-    }
-
     if (!activeVistoriaId) {
-      alert(
-        "Não existe uma vistoria ativa."
-      );
-
+      alert("Não existe uma vistoria ativa.");
       return;
     }
+
+    const requisito = checklist.find((item) => item.id === requisitoId);
+    if (!requisito) return;
 
     setIsSaving(true);
 
     try {
+      const files = evidenciasTemp[requisitoId] || [];
       const urlsFotos: string[] = [];
+      const urlsArquivos: string[] = [];
+      const urlsAudios: string[] = [];
 
-      /* -----------------------------------------------
-         UPLOAD DAS FOTOS
-      ------------------------------------------------ */
+      for (const file of files) {
+        const ext = file.name.split(".").pop() || "bin";
+        const safeName = `${Date.now()}-${Math.random().toString(36).slice(2)}.${ext}`;
+        const filePath = `${activeVistoriaId}/${requisitoId}/${safeName}`;
 
-      if (fotosTemp.length > 0) {
-        for (const file of fotosTemp) {
-          const fileExt =
-            file.name.split(".").pop() ||
-            "jpg";
+        const { error } = await supabase.storage
+          .from("fotos_vistorias")
+          .upload(filePath, file);
 
-          const filePath = `${activeVistoriaId}/${requisitoAtual.id}/${Date.now()}-${Math.random()
-            .toString(36)
-            .slice(2)}.${fileExt}`;
+        if (error) throw error;
 
-          const {
-            error: uploadError,
-          } = await supabase.storage
-            .from("fotos_vistorias")
-            .upload(
-              filePath,
-              file
-            );
+        const { data } = supabase.storage
+          .from("fotos_vistorias")
+          .getPublicUrl(filePath);
 
-          if (uploadError) {
-            console.error(
-              "Erro no upload da foto:",
-              uploadError
-            );
-
-            alert(
-              `Erro ao enviar a foto.\n\n${uploadError.message}`
-            );
-
-            return;
-          }
-
-          const {
-            data: urlData,
-          } = supabase.storage
-            .from("fotos_vistorias")
-            .getPublicUrl(
-              filePath
-            );
-
-          if (
-            urlData?.publicUrl
-          ) {
-            urlsFotos.push(
-              urlData.publicUrl
-            );
-          }
+        if (data?.publicUrl) {
+          if (file.type.startsWith("image/")) urlsFotos.push(data.publicUrl);
+          else urlsArquivos.push(data.publicUrl);
         }
       }
 
-      /* -----------------------------------------------
-         RESPOSTA
-      ------------------------------------------------ */
+      const audio = audiosTemp[requisitoId];
+      if (audio) {
+        const filePath = `${activeVistoriaId}/${requisitoId}/${Date.now()}-${Math.random().toString(36).slice(2)}.webm`;
+        const { error } = await supabase.storage
+          .from("fotos_vistorias")
+          .upload(filePath, audio, { contentType: audio.type || "audio/webm" });
+        if (error) throw error;
+
+        const { data } = supabase.storage
+          .from("fotos_vistorias")
+          .getPublicUrl(filePath);
+        if (data?.publicUrl) urlsAudios.push(data.publicUrl);
+      }
+
+      const observacao = (observacoesTemp[requisitoId] || "").trim();
+      const transcricao = (transcricoesTemp[requisitoId] || "").trim();
+      const respostaAnterior = vistoria.respostas[requisitoId];
 
       const novaResposta: Resposta = {
-        requisitoId:
-          requisitoAtual.id,
+        requisitoId,
         status,
-        observacao:
-          observacao.trim(),
-        fotos: urlsFotos,
-        timestamp:
-          new Date().toISOString(),
+        observacao,
+        fotos: [...(respostaAnterior?.fotos || []), ...urlsFotos],
+        arquivos: [...(respostaAnterior?.arquivos || []), ...urlsArquivos],
+        audios: [...(respostaAnterior?.audios || []), ...urlsAudios],
+        transcricao: transcricao || respostaAnterior?.transcricao,
+        timestamp: new Date().toISOString(),
       };
 
-      const novasRespostas: Respostas = {
+      const novasRespostas = {
         ...vistoria.respostas,
-        [requisitoAtual.id]:
-          novaResposta,
+        [requisitoId]: novaResposta,
       };
 
-      /* -----------------------------------------------
-         ESTADO + BANCO
-      ------------------------------------------------ */
-
-      setVistoria((prev) => ({
-        ...prev,
-        respostas:
-          novasRespostas,
-      }));
-
-      await updateVistoriaInDb({
-        respostas:
-          novasRespostas,
-      });
-
-      /* -----------------------------------------------
-         LIMPA MODAL
-      ------------------------------------------------ */
-
-      setModalAberto(null);
-      setObsTemp("");
-      setFotosTemp([]);
-
-      /* -----------------------------------------------
-         AVANÇA
-      ------------------------------------------------ */
-
-      if (
-        currentIndex <
-        checklist.length - 1
-      ) {
-        setTimeout(() => {
-          setCurrentIndex(
-            (prev) => prev + 1
-          );
-        }, 120);
-      } else {
-        setTimeout(() => {
-          setView("relatorio");
-        }, 180);
-      }
+      setVistoria((prev) => ({ ...prev, respostas: novasRespostas }));
+      await updateVistoriaInDb({ respostas: novasRespostas });
+      limparEvidenciasTemporarias(requisitoId);
+    } catch (error: any) {
+      console.error("Erro ao salvar avaliação:", error);
+      alert(`Não foi possível salvar a avaliação.\n\n${error?.message || "Erro desconhecido."}`);
     } finally {
       setIsSaving(false);
     }
+  };
+
+  const salvarObservacao = async (requisitoId: string) => {
+    const respostaAnterior = vistoria.respostas[requisitoId];
+    if (!respostaAnterior) return;
+    await registrarAvaliacao(requisitoId, respostaAnterior.status);
+  };
+
+  const scrollToRequisito = (id: string) => {
+    const index = checklist.findIndex((item) => item.id === id);
+    if (index === -1) return;
+    setCurrentIndex(index);
+    setIsMenuOpen(false);
+    requestAnimationFrame(() => {
+      document.getElementById(`requisito-${id}`)?.scrollIntoView({
+        behavior: "smooth",
+        block: "center",
+      });
+    });
   };
 
   /* =======================================================
@@ -2719,1137 +2795,244 @@ export default function PreImplantacaoApp() {
   }
 
   /* =======================================================
-     VISTORIA
+     VISTORIA — PAINEL CONTÍNUO / ROLÁVEL
   ======================================================= */
 
-  const requisitoAtual =
-    checklist[currentIndex];
-
-  if (!requisitoAtual) {
-    return null;
-  }
-
-  const respostaAtual =
-    vistoria.respostas[
-      requisitoAtual.id
-    ];
-
-  const progressoVistoria =
-    checklist.length > 0
-      ? Math.round(
-          ((currentIndex + 1) /
-            checklist.length) *
-            100
-        )
-      : 0;
-
-  /* =======================================================
-     TELA VISTORIA
-  ======================================================= */
+  const currentRequisito = checklist[currentIndex] || checklist[0];
 
   return (
     <main
-      className="
-        min-h-screen
-        relative
-        overflow-hidden
-        text-slate-800
-      "
+      className="min-h-screen text-slate-800 relative overflow-hidden"
       style={{
         background: `
-          radial-gradient(
-            circle at 0% 0%,
-            rgba(154,211,225,0.85),
-            transparent 30%
-          ),
-          radial-gradient(
-            circle at 100% 20%,
-            rgba(129,205,235,0.65),
-            transparent 30%
-          ),
-          linear-gradient(
-            135deg,
-            #f8fdfe 0%,
-            #e7f6f9 50%,
-            #d7f0f4 100%
-          )
+          radial-gradient(circle at 0% 0%, rgba(154,211,225,0.78), transparent 30%),
+          radial-gradient(circle at 100% 12%, rgba(129,205,235,0.52), transparent 28%),
+          radial-gradient(circle at 50% 100%, rgba(67,195,188,0.18), transparent 34%),
+          linear-gradient(135deg, #f8fdfe 0%, #eaf8fa 48%, #d9f2f5 100%)
         `,
       }}
     >
-      {/* -----------------------------------------------
-          DESKTOP LAYOUT
-      ------------------------------------------------ */}
-
       <div className="min-h-screen flex">
-        {/* SIDEBAR */}
-
         <div className="hidden lg:block shrink-0">
           {topicListNav}
         </div>
 
-        {/* CONTEÚDO */}
-
         <div className="flex-1 min-w-0 flex flex-col">
-          {/* ---------------------------------------------
-              HEADER
-          ---------------------------------------------- */}
-
-          <header
-            className="
-              sticky
-              top-0
-              z-30
-              bg-white/55
-              backdrop-blur-2xl
-              border-b
-              border-white
-              px-4
-              lg:px-7
-              py-3
-            "
-          >
+          <header className="sticky top-0 z-40 bg-white/60 backdrop-blur-2xl border-b border-white/80 px-4 lg:px-7 py-3 shadow-[0_10px_35px_rgba(28,133,168,0.08)]">
             <div className="flex items-center gap-3">
-              {/* voltar */}
-
               <button
-                onClick={() =>
-                  setView(
-                    "dashboard"
-                  )
-                }
-                className="
-                  w-10
-                  h-10
-                  rounded-xl
-                  bg-white/70
-                  border
-                  border-white
-                  flex
-                  items-center
-                  justify-center
-                  shadow-sm
-                  hover:scale-105
-                  transition-transform
-                  shrink-0
-                "
-                style={{
-                  color: COLORS.dark,
-                }}
+                onClick={() => setView("dashboard")}
+                className="w-10 h-10 rounded-xl bg-white/75 border border-white flex items-center justify-center shadow-sm hover:scale-105 transition-transform shrink-0"
+                style={{ color: COLORS.dark }}
+                title="Voltar ao início"
               >
-                <ArrowLeft
-                  size={19}
-                />
+                <ArrowLeft size={19} />
               </button>
-
-              {/* título */}
 
               <div className="flex-1 min-w-0">
                 <div className="flex items-center gap-2">
-                  <span
-                    className="
-                      text-[9px]
-                      font-black
-                      tracking-[0.2em]
-                      uppercase
-                    "
-                    style={{
-                      color:
-                        COLORS.dark,
-                    }}
-                  >
-                    VISTORIA
-                  </span>
-
-                  <span className="text-slate-300">
-                    /
-                  </span>
-
-                  <span className="text-[10px] font-bold text-slate-500 truncate">
-                    {
-                      requisitoAtual.categoria
-                    }
-                  </span>
+                  <span className="text-[9px] font-black tracking-[0.2em] uppercase" style={{ color: COLORS.dark }}>VISTORIA CONTÍNUA</span>
+                  <span className="text-slate-300">/</span>
+                  <span className="text-[10px] font-bold text-slate-500 truncate">{currentRequisito?.categoria}</span>
                 </div>
-
-                <h1 className="font-black text-sm lg:text-base text-slate-700 truncate">
-                  {vistoria.local}
-                </h1>
+                <h1 className="font-black text-sm lg:text-base text-slate-700 truncate">{vistoria.local}</h1>
               </div>
 
-              {/* contador */}
-
-              <div
-                className="
-                  hidden
-                  sm:flex
-                  items-center
-                  gap-2
-                  px-3
-                  py-2
-                  rounded-xl
-                  bg-white/65
-                  border
-                  border-white
-                "
-              >
-                <span
-                  className="text-sm font-black"
-                  style={{
-                    color:
-                      COLORS.dark,
-                  }}
-                >
-                  {currentIndex + 1}
-                </span>
-
-                <span className="text-xs text-slate-400">
-                  /
-                </span>
-
-                <span className="text-xs font-bold text-slate-500">
-                  {checklist.length}
-                </span>
+              <div className="hidden sm:flex items-center gap-2 px-3 py-2 rounded-xl bg-white/65 border border-white">
+                <span className="text-sm font-black" style={{ color: COLORS.dark }}>{currentIndex + 1}</span>
+                <span className="text-xs text-slate-400">/</span>
+                <span className="text-xs font-bold text-slate-500">{checklist.length}</span>
               </div>
-
-              {/* mobile menu */}
 
               <button
-                onClick={() =>
-                  setIsMenuOpen(true)
-                }
-                className="
-                  lg:hidden
-                  w-10
-                  h-10
-                  rounded-xl
-                  bg-white/70
-                  border
-                  border-white
-                  flex
-                  items-center
-                  justify-center
-                "
-                style={{
-                  color:
-                    COLORS.dark,
-                }}
+                onClick={() => setIsMenuOpen(true)}
+                className="lg:hidden w-10 h-10 rounded-xl bg-white/75 border border-white flex items-center justify-center"
+                style={{ color: COLORS.dark }}
               >
                 <Menu size={19} />
               </button>
             </div>
 
-            {/* progress */}
-
             <div className="mt-3 flex items-center gap-3">
-              <div className="flex-1 h-1.5 rounded-full bg-slate-200/70 overflow-hidden">
-                <div
-                  className="h-full rounded-full transition-all duration-500"
-                  style={{
-                    width: `${progressoVistoria}%`,
-                    background: `
-                      linear-gradient(
-                        90deg,
-                        ${COLORS.cerulean},
-                        ${COLORS.turquoise}
-                      )
-                    `,
-                  }}
-                />
+              <div className="flex-1 h-1.5 rounded-full bg-white/70 overflow-hidden">
+                <div className="h-full rounded-full transition-all duration-500" style={{ width: `${progressoTotal}%`, background: `linear-gradient(90deg, ${COLORS.cerulean}, ${COLORS.turquoise})` }} />
               </div>
-
-              <span
-                className="text-[10px] font-black"
-                style={{
-                  color:
-                    COLORS.dark,
-                }}
-              >
-                {progressoVistoria}%
-              </span>
+              <span className="text-[10px] font-black" style={{ color: COLORS.dark }}>{progressoTotal}% concluído</span>
             </div>
           </header>
 
-          {/* ---------------------------------------------
-              ÁREA PRINCIPAL
-          ---------------------------------------------- */}
-
-          <section className="flex-1 flex flex-col px-4 lg:px-8 py-5 lg:py-8">
-            <div className="max-w-4xl w-full mx-auto flex-1 flex flex-col">
-              {/* código */}
-
-              <div className="flex items-center gap-2 mb-4">
-                <span
-                  className="
-                    px-3
-                    py-1.5
-                    rounded-full
-                    text-[10px]
-                    font-black
-                    tracking-wider
-                  "
-                  style={{
-                    color:
-                      COLORS.dark,
-                    background:
-                      "rgba(84,180,231,0.14)",
-                  }}
-                >
-                  {requisitoAtual.codigo}
-                </span>
-
-                <span className="text-xs text-slate-400">
-                  {requisitoAtual.criticidade}
-                </span>
-              </div>
-
-              {/* CARD DA PERGUNTA */}
-
-              <div
-                className="
-                  rounded-[2rem]
-                  p-6
-                  lg:p-9
-                  bg-white/50
-                  backdrop-blur-2xl
-                  border
-                  border-white/80
-                  shadow-[0_20px_70px_rgba(28,133,168,0.10)]
-                  relative
-                  overflow-hidden
-                "
-              >
-                {/* glow */}
-
-                <div
-                  className="
-                    absolute
-                    -right-24
-                    -top-24
-                    w-64
-                    h-64
-                    rounded-full
-                    blur-3xl
-                    opacity-25
-                  "
-                  style={{
-                    background:
-                      COLORS.sky,
-                  }}
-                />
-
-                <div className="relative z-10">
-                  <p
-                    className="
-                      text-[10px]
-                      font-black
-                      tracking-[0.25em]
-                      uppercase
-                      mb-3
-                    "
-                    style={{
-                      color:
-                        COLORS.petrol,
-                    }}
-                  >
-                    REQUISITO DE AVALIAÇÃO
-                  </p>
-
-                  <h2
-                    className="
-                      text-2xl
-                      lg:text-4xl
-                      font-black
-                      leading-tight
-                      tracking-tight
-                      text-slate-700
-                    "
-                  >
-                    {
-                      requisitoAtual.pergunta
-                    }
-                  </h2>
-
-                  {respostaAtual && (
-                    <div
-                      className="
-                        mt-5
-                        inline-flex
-                        items-center
-                        gap-2
-                        px-3
-                        py-2
-                        rounded-xl
-                        bg-white/70
-                        border
-                        border-white
-                      "
-                    >
-                      <span
-                        className="w-2 h-2 rounded-full"
-                        style={{
-                          background:
-                            respostaAtual.status ===
-                            "conforme"
-                              ? COLORS.turquoise
-                              : respostaAtual.status ===
-                                "ressalva"
-                              ? COLORS.cerulean
-                              : COLORS.dark,
-                        }}
-                      />
-
-                      <span className="text-xs font-bold text-slate-600">
-                        Item já avaliado
-                      </span>
-                    </div>
-                  )}
-                </div>
-              </div>
-
-              {/* -----------------------------------------
-                  AÇÕES
-              ------------------------------------------ */}
-
-              <div className="mt-5">
-                <p className="text-center text-[10px] font-black uppercase tracking-[0.2em] text-slate-400 mb-3">
-                  REGISTRAR AVALIAÇÃO
-                </p>
-
-                <div className="grid grid-cols-3 gap-2.5 lg:gap-4">
-                  {/* CONFORME */}
-
-                  <button
-                    onClick={() =>
-                      void registrarAvaliacao(
-                        "conforme"
-                      )
-                    }
-                    disabled={
-                      isSaving
-                    }
-                    className="
-                      group
-                      relative
-                      overflow-hidden
-                      min-h-[120px]
-                      lg:min-h-[145px]
-                      rounded-[1.5rem]
-                      p-4
-                      flex
-                      flex-col
-                      items-center
-                      justify-center
-                      gap-3
-                      bg-white/55
-                      backdrop-blur-xl
-                      border
-                      border-white
-                      hover:-translate-y-1
-                      active:translate-y-0
-                      transition-all
-                      shadow-sm
-                    "
-                    style={{
-                      color:
-                        COLORS.turquoise,
-                    }}
-                  >
-                    <div
-                      className="
-                        w-12
-                        h-12
-                        rounded-2xl
-                        flex
-                        items-center
-                        justify-center
-                        group-hover:scale-110
-                        transition-transform
-                      "
-                      style={{
-                        background:
-                          "rgba(67,195,188,0.15)",
-                      }}
-                    >
-                      <Check
-                        size={26}
-                        strokeWidth={3}
-                      />
-                    </div>
-
-                    <span className="font-black text-xs lg:text-sm">
-                      CONFORME
-                    </span>
-                  </button>
-
-                  {/* RESSALVA */}
-
-                  <button
-                    onClick={() =>
-                      setModalAberto(
-                        "ressalva"
-                      )
-                    }
-                    disabled={
-                      isSaving
-                    }
-                    className="
-                      group
-                      relative
-                      overflow-hidden
-                      min-h-[120px]
-                      lg:min-h-[145px]
-                      rounded-[1.5rem]
-                      p-4
-                      flex
-                      flex-col
-                      items-center
-                      justify-center
-                      gap-3
-                      bg-white/55
-                      backdrop-blur-xl
-                      border
-                      border-white
-                      hover:-translate-y-1
-                      active:translate-y-0
-                      transition-all
-                      shadow-sm
-                    "
-                    style={{
-                      color:
-                        COLORS.cerulean,
-                    }}
-                  >
-                    <div
-                      className="
-                        w-12
-                        h-12
-                        rounded-2xl
-                        flex
-                        items-center
-                        justify-center
-                        group-hover:scale-110
-                        transition-transform
-                      "
-                      style={{
-                        background:
-                          "rgba(84,180,231,0.15)",
-                      }}
-                    >
-                      <AlertTriangle
-                        size={25}
-                        strokeWidth={2.7}
-                      />
-                    </div>
-
-                    <span className="font-black text-xs lg:text-sm">
-                      RESSALVA
-                    </span>
-                  </button>
-
-                  {/* NÃO POSSUI */}
-
-                  <button
-                    onClick={() =>
-                      setModalAberto(
-                        "nao_possui"
-                      )
-                    }
-                    disabled={
-                      isSaving
-                    }
-                    className="
-                      group
-                      relative
-                      overflow-hidden
-                      min-h-[120px]
-                      lg:min-h-[145px]
-                      rounded-[1.5rem]
-                      p-4
-                      flex
-                      flex-col
-                      items-center
-                      justify-center
-                      gap-3
-                      bg-white/55
-                      backdrop-blur-xl
-                      border
-                      border-white
-                      hover:-translate-y-1
-                      active:translate-y-0
-                      transition-all
-                      shadow-sm
-                    "
-                    style={{
-                      color:
-                        COLORS.dark,
-                    }}
-                  >
-                    <div
-                      className="
-                        w-12
-                        h-12
-                        rounded-2xl
-                        flex
-                        items-center
-                        justify-center
-                        group-hover:scale-110
-                        transition-transform
-                      "
-                      style={{
-                        background:
-                          "rgba(28,133,168,0.12)",
-                      }}
-                    >
-                      <X
-                        size={26}
-                        strokeWidth={3}
-                      />
-                    </div>
-
-                    <span className="font-black text-xs lg:text-sm">
-                      NÃO POSSUI
-                    </span>
-                  </button>
-                </div>
-              </div>
-
-              {/* -----------------------------------------
-                  NAVEGAÇÃO
-              ------------------------------------------ */}
-
-              <div
-                className="
-                  mt-auto
-                  pt-6
-                  flex
-                  items-center
-                  justify-between
-                  gap-3
-                "
-              >
-                <button
-                  onClick={
-                    goPrevious
-                  }
-                  disabled={
-                    currentIndex ===
-                      0 ||
-                    isSaving
-                  }
-                  className="
-                    flex-1
-                    max-w-[180px]
-                    py-3.5
-                    rounded-2xl
-                    bg-white/60
-                    backdrop-blur-xl
-                    border
-                    border-white
-                    flex
-                    items-center
-                    justify-center
-                    gap-2
-                    text-xs
-                    font-black
-                    text-slate-500
-                    disabled:opacity-30
-                    hover:bg-white
-                    transition-all
-                  "
-                >
-                  <ChevronLeft
-                    size={18}
-                  />
-                  ANTERIOR
-                </button>
-
-                <div
-                  className="
-                    hidden
-                    sm:flex
-                    items-center
-                    gap-1
-                  "
-                >
-                  {Array.from({
-                    length: Math.min(
-                      5,
-                      checklist.length
-                    ),
-                  }).map(
-                    (_, index) => {
-                      const offset =
-                        Math.min(
-                          Math.max(
-                            currentIndex -
-                              2,
-                            0
-                          ),
-                          Math.max(
-                            checklist.length -
-                              5,
-                            0
-                          )
-                        );
-
-                      const realIndex =
-                        offset +
-                        index;
-
+          <section className="flex-1 px-3 sm:px-5 lg:px-8 py-5 lg:py-7 pb-28">
+            <div className="max-w-5xl mx-auto space-y-5">
+              <div className="rounded-[2rem] p-5 lg:p-6 bg-white/48 backdrop-blur-2xl border border-white/80 shadow-[0_20px_70px_rgba(28,133,168,0.10)]">
+                <div className="flex flex-col lg:flex-row lg:items-end lg:justify-between gap-4">
+                  <div>
+                    <p className="text-[10px] font-black tracking-[0.24em] uppercase" style={{ color: COLORS.dark }}>ROTEIRO DE INSPEÇÃO</p>
+                    <h2 className="text-xl lg:text-2xl font-black text-slate-700 mt-1">Todos os requisitos em uma única tela</h2>
+                    <p className="text-xs text-slate-500 mt-1">Role a página, registre o status e anexe evidências sem trocar de tela.</p>
+                  </div>
+                  <div className="flex gap-2 flex-wrap">
+                    {categorias.map((categoria) => {
+                      const total = checklist.filter((item) => item.categoria === categoria).length;
+                      const feitos = checklist.filter((item) => item.categoria === categoria && vistoria.respostas[item.id]).length;
                       return (
-                        <button
-                          key={
-                            realIndex
-                          }
-                          onClick={() =>
-                            setCurrentIndex(
-                              realIndex
-                            )
-                          }
-                          className="
-                            w-2
-                            h-2
-                            rounded-full
-                            transition-all
-                          "
-                          style={{
-                            background:
-                              realIndex ===
-                              currentIndex
-                                ? COLORS.dark
-                                : "rgba(28,133,168,0.20)",
-                            transform:
-                              realIndex ===
-                              currentIndex
-                                ? "scale(1.5)"
-                                : "scale(1)",
-                          }}
-                        />
+                        <button key={categoria} onClick={() => abrirCategoria(categoria)} className="px-3 py-2 rounded-full bg-white/65 border border-white text-[10px] font-black text-slate-500 hover:bg-white transition-colors">
+                          {categoria.split("—")[1]?.trim() || categoria} · {feitos}/{total}
+                        </button>
                       );
-                    }
-                  )}
+                    })}
+                  </div>
                 </div>
-
-                <button
-                  onClick={
-                    goNext
-                  }
-                  disabled={
-                    currentIndex >=
-                      checklist.length -
-                        1 ||
-                    isSaving
-                  }
-                  className="
-                    flex-1
-                    max-w-[180px]
-                    py-3.5
-                    rounded-2xl
-                    text-white
-                    flex
-                    items-center
-                    justify-center
-                    gap-2
-                    text-xs
-                    font-black
-                    disabled:opacity-30
-                    shadow-lg
-                    hover:-translate-y-0.5
-                    transition-all
-                  "
-                  style={{
-                    background: `
-                      linear-gradient(
-                        135deg,
-                        ${COLORS.cerulean},
-                        ${COLORS.petrol}
-                      )
-                    `,
-                  }}
-                >
-                  PRÓXIMO
-                  <ChevronRight
-                    size={18}
-                  />
-                </button>
               </div>
+
+              {checklist.map((req, index) => {
+                const resposta = vistoria.respostas[req.id];
+                const files = evidenciasTemp[req.id] || [];
+                const audio = audiosTemp[req.id];
+                const observacao = observacoesTemp[req.id] ?? resposta?.observacao ?? "";
+                const transcricao = transcricoesTemp[req.id] ?? resposta?.transcricao ?? "";
+                const isCurrent = index === currentIndex;
+                const statusColor = resposta?.status === "conforme" ? COLORS.turquoise : resposta?.status === "ressalva" ? COLORS.cerulean : resposta?.status === "nao_possui" ? COLORS.dark : COLORS.metallic;
+
+                return (
+                  <article
+                    id={`requisito-${req.id}`}
+                    key={req.id}
+                    onMouseEnter={() => setCurrentIndex(index)}
+                    className={`relative rounded-[1.65rem] p-4 sm:p-5 bg-white/55 backdrop-blur-2xl border transition-all duration-300 ${isCurrent ? "border-white shadow-[0_18px_50px_rgba(28,133,168,0.13)]" : "border-white/70 shadow-sm"}`}
+                    style={{ borderLeft: `4px solid ${statusColor}` }}
+                  >
+                    <div className="absolute -right-16 -top-16 w-40 h-40 rounded-full blur-3xl opacity-20 pointer-events-none" style={{ background: isCurrent ? COLORS.sky : COLORS.ice }} />
+
+                    <div className="relative z-10">
+                      <div className="flex items-start justify-between gap-3">
+                        <div className="min-w-0">
+                          <div className="flex items-center gap-2 flex-wrap">
+                            <span className="px-2.5 py-1 rounded-lg text-[10px] font-black" style={{ color: COLORS.dark, background: "rgba(154,211,225,0.28)" }}>{req.codigo}</span>
+                            <span className="text-[9px] font-black uppercase tracking-wider text-slate-400">{req.criticidade}</span>
+                          </div>
+                          <h3 className="mt-3 text-base sm:text-lg font-black leading-snug text-slate-700">{req.pergunta}</h3>
+                        </div>
+                        <span className="shrink-0 text-[9px] font-black text-slate-400">{index + 1}/{checklist.length}</span>
+                      </div>
+
+                      <div className="grid grid-cols-3 gap-2 mt-4">
+                        {([
+                          { status: "conforme" as StatusAvaliacao, label: "Conforme", icon: Check, color: COLORS.turquoise },
+                          { status: "ressalva" as StatusAvaliacao, label: "Ressalva", icon: AlertTriangle, color: COLORS.cerulean },
+                          { status: "nao_possui" as StatusAvaliacao, label: "Não possui", icon: X, color: COLORS.dark },
+                        ]).map((action) => {
+                          const Icon = action.icon;
+                          const active = resposta?.status === action.status;
+                          return (
+                            <button
+                              key={action.status}
+                              onClick={() => void registrarAvaliacao(req.id, action.status)}
+                              disabled={isSaving}
+                              className="min-h-[64px] sm:min-h-[70px] rounded-xl px-2 py-2 flex flex-col items-center justify-center gap-1 border transition-all active:scale-[0.98] disabled:opacity-40"
+                              style={{
+                                color: action.color,
+                                background: active ? `${action.color}1F` : "rgba(255,255,255,0.58)",
+                                borderColor: active ? `${action.color}66` : "rgba(255,255,255,0.9)",
+                                boxShadow: active ? `0 8px 22px ${action.color}22` : undefined,
+                              }}
+                            >
+                              <Icon size={19} strokeWidth={2.8} />
+                              <span className="text-[10px] font-black uppercase">{action.label}</span>
+                            </button>
+                          );
+                        })}
+                      </div>
+
+                      <div className="mt-3 rounded-2xl p-3 bg-white/38 border border-white/70">
+                        <p className="text-[9px] font-black tracking-[0.18em] uppercase text-slate-400 mb-2">EVIDÊNCIAS</p>
+                        <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+                          <label className="cursor-pointer rounded-xl px-2 py-2.5 bg-white/65 border border-white flex items-center justify-center gap-2 text-[10px] font-black text-slate-500 hover:bg-white transition-colors">
+                            <Camera size={16} style={{ color: COLORS.cerulean }} /> CÂMERA
+                            <input type="file" accept="image/*" capture="environment" className="hidden" onChange={(event) => handleFileSelect(event, req.id)} />
+                          </label>
+                          <label className="cursor-pointer rounded-xl px-2 py-2.5 bg-white/65 border border-white flex items-center justify-center gap-2 text-[10px] font-black text-slate-500 hover:bg-white transition-colors">
+                            <ImageIcon size={16} style={{ color: COLORS.petrol }} /> GALERIA
+                            <input type="file" accept="image/*,*/*" multiple className="hidden" onChange={(event) => handleFileSelect(event, req.id)} />
+                          </label>
+                          <button type="button" onClick={() => void toggleAudioRecording(req.id)} className="rounded-xl px-2 py-2.5 bg-white/65 border border-white flex items-center justify-center gap-2 text-[10px] font-black transition-colors" style={{ color: gravandoAudio === req.id ? COLORS.dark : COLORS.turquoise, background: gravandoAudio === req.id ? "rgba(28,133,168,0.12)" : undefined }}>
+                            {gravandoAudio === req.id ? <X size={16} /> : <Mic size={16} />} {gravandoAudio === req.id ? "PARAR" : "ÁUDIO"}
+                          </button>
+                          <button type="button" onClick={() => document.getElementById(`obs-${req.id}`)?.focus()} className="rounded-xl px-2 py-2.5 bg-white/65 border border-white flex items-center justify-center gap-2 text-[10px] font-black text-slate-500 hover:bg-white transition-colors">
+                            <FileText size={16} style={{ color: COLORS.dark }} /> TEXTO
+                          </button>
+                        </div>
+
+                        {(files.length > 0 || audio || observacao || transcricao || resposta?.fotos?.length || resposta?.arquivos?.length || resposta?.audios?.length) && (
+                          <div className="mt-3 space-y-2">
+                            {files.length > 0 && (
+                              <div className="flex gap-2 overflow-x-auto pb-1">
+                                {files.map((file, fileIndex) => (
+                                  <div key={`${file.name}-${fileIndex}`} className="relative shrink-0">
+                                    {file.type.startsWith("image/") ? (
+                                      <img src={URL.createObjectURL(file)} alt={`Evidência ${fileIndex + 1}`} className="w-16 h-16 rounded-xl object-cover border border-white shadow-sm" />
+                                    ) : (
+                                      <div className="w-16 h-16 rounded-xl bg-white/75 border border-white flex items-center justify-center"><Paperclip size={19} style={{ color: COLORS.dark }} /></div>
+                                    )}
+                                    <button type="button" onClick={() => handleRemoveEvidence(req.id, fileIndex)} className="absolute -top-1 -right-1 w-5 h-5 rounded-full bg-white shadow flex items-center justify-center" style={{ color: COLORS.dark }}><X size={12} /></button>
+                                  </div>
+                                ))}
+                              </div>
+                            )}
+                            {audio && <audio controls src={URL.createObjectURL(audio)} className="w-full h-9" />}
+                          </div>
+                        )}
+
+                        <textarea
+                          id={`obs-${req.id}`}
+                          value={observacao}
+                          onChange={(event) => setObservacoesTemp((prev) => ({ ...prev, [req.id]: event.target.value }))}
+                          placeholder="Observação técnica, medição, condição encontrada ou evidência relevante..."
+                          className="mt-3 w-full min-h-[70px] resize-y rounded-xl bg-white/55 border border-white p-3 text-xs text-slate-700 outline-none placeholder:text-slate-400 focus:ring-2 focus:ring-[#81CDEB]/40"
+                        />
+
+                        {transcricao && (
+                          <div className="mt-2 rounded-xl bg-[#9AD3E1]/15 border border-white p-3">
+                            <p className="text-[9px] font-black uppercase tracking-wider" style={{ color: COLORS.dark }}>TRANSCRIÇÃO DE VOZ</p>
+                            <p className="text-xs text-slate-600 mt-1">{transcricao}</p>
+                          </div>
+                        )}
+
+                        {(observacao || transcricao || files.length || audio) && (
+                          <button type="button" onClick={() => void salvarObservacao(req.id)} disabled={isSaving} className="mt-2 px-3 py-2 rounded-xl text-[10px] font-black text-white disabled:opacity-40" style={{ background: `linear-gradient(135deg, ${COLORS.cerulean}, ${COLORS.petrol})` }}>
+                            SALVAR EVIDÊNCIAS / OBSERVAÇÃO
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                  </article>
+                );
+              })}
             </div>
           </section>
         </div>
       </div>
 
-      {/* =================================================
-          MENU MOBILE
-      ================================================== */}
+      {/* Navegação anterior/próximo — sem trocar de página */}
+      <div className="fixed bottom-0 left-0 right-0 z-50 px-3 pb-3 lg:pb-4 pointer-events-none">
+        <div className="max-w-3xl mx-auto pointer-events-auto rounded-2xl p-2 bg-white/75 backdrop-blur-2xl border border-white shadow-[0_12px_45px_rgba(28,133,168,0.16)] flex items-center gap-2">
+          <button onClick={goPrevious} disabled={currentIndex === 0} className="flex-1 py-2.5 rounded-xl bg-white/75 border border-white text-[10px] font-black text-slate-500 flex items-center justify-center gap-1.5 disabled:opacity-30">
+            <ChevronLeft size={16} /> ANTERIOR
+          </button>
+          <div className="px-3 text-center shrink-0">
+            <p className="text-[9px] font-black" style={{ color: COLORS.dark }}>{currentIndex + 1} / {checklist.length}</p>
+            <p className="text-[8px] text-slate-400 uppercase tracking-wider">requisito</p>
+          </div>
+          <button onClick={goNext} disabled={currentIndex >= checklist.length - 1} className="flex-1 py-2.5 rounded-xl text-white text-[10px] font-black flex items-center justify-center gap-1.5 disabled:opacity-30" style={{ background: `linear-gradient(135deg, ${COLORS.cerulean}, ${COLORS.petrol})` }}>
+            PRÓXIMO <ChevronRight size={16} />
+          </button>
+        </div>
+      </div>
 
+      {/* Sidebar mobile */}
       {isMenuOpen && (
         <div className="fixed inset-0 z-[70] lg:hidden">
-          <div
-            className="
-              absolute
-              inset-0
-              bg-slate-900/20
-              backdrop-blur-sm
-            "
-            onClick={() =>
-              setIsMenuOpen(false)
-            }
-          />
-
-          <div className="absolute left-0 top-0 bottom-0">
-            {topicListNav}
-          </div>
-        </div>
-      )}
-
-      {/* =================================================
-          MODAL RESSALVA / NÃO POSSUI
-      ================================================== */}
-
-      {(modalAberto ===
-        "ressalva" ||
-        modalAberto ===
-          "nao_possui") && (
-        <div className="fixed inset-0 z-[90] flex items-end lg:items-center justify-center">
-          <div
-            className="
-              absolute
-              inset-0
-              bg-slate-900/20
-              backdrop-blur-md
-            "
-            onClick={() =>
-              setModalAberto(
-                null
-              )
-            }
-          />
-
-          <div
-            className="
-              relative
-              z-10
-              w-full
-              lg:max-w-lg
-              rounded-t-[2rem]
-              lg:rounded-[2rem]
-              p-6
-              pb-7
-              bg-white/85
-              backdrop-blur-2xl
-              border
-              border-white
-              shadow-[0_-20px_80px_rgba(28,133,168,0.20)]
-            "
-          >
-            <div className="flex justify-center lg:hidden mb-4">
-              <div className="w-12 h-1.5 rounded-full bg-slate-200" />
-            </div>
-
-            <div className="flex items-center justify-between mb-5">
-              <div className="flex items-center gap-3">
-                <div
-                  className="
-                    w-11
-                    h-11
-                    rounded-2xl
-                    flex
-                    items-center
-                    justify-center
-                  "
-                  style={{
-                    color:
-                      modalAberto ===
-                      "ressalva"
-                        ? COLORS.cerulean
-                        : COLORS.dark,
-                    background:
-                      modalAberto ===
-                      "ressalva"
-                        ? "rgba(84,180,231,0.14)"
-                        : "rgba(28,133,168,0.10)",
-                  }}
-                >
-                  {modalAberto ===
-                  "ressalva" ? (
-                    <AlertTriangle
-                      size={21}
-                    />
-                  ) : (
-                    <X size={22} />
-                  )}
-                </div>
-
-                <div>
-                  <p
-                    className="text-[10px] font-black tracking-widest"
-                    style={{
-                      color:
-                        modalAberto ===
-                        "ressalva"
-                          ? COLORS.cerulean
-                          : COLORS.dark,
-                    }}
-                  >
-                    REGISTRO
-                  </p>
-
-                  <h3 className="font-black text-lg text-slate-700">
-                    {modalAberto ===
-                    "ressalva"
-                      ? "Registrar ressalva"
-                      : "Não possui"}
-                  </h3>
-                </div>
-              </div>
-
-              <button
-                onClick={() =>
-                  setModalAberto(
-                    null
-                  )
-                }
-                className="
-                  w-9
-                  h-9
-                  rounded-full
-                  bg-white
-                  border
-                  border-slate-100
-                  flex
-                  items-center
-                  justify-center
-                  text-slate-400
-                "
-              >
-                <X size={18} />
-              </button>
-            </div>
-
-            {/* observação */}
-
-            <textarea
-              autoFocus
-              value={obsTemp}
-              onChange={(event) =>
-                setObsTemp(
-                  event.target.value
-                )
-              }
-              placeholder="Descreva a situação encontrada..."
-              className="
-                w-full
-                h-28
-                resize-none
-                rounded-2xl
-                bg-white/70
-                border
-                border-slate-200
-                p-4
-                outline-none
-                text-sm
-                text-slate-700
-                placeholder:text-slate-400
-              "
-            />
-
-            {/* fotos */}
-
-            {fotosTemp.length > 0 && (
-              <div className="mt-4">
-                <p className="text-[10px] font-black tracking-wider text-slate-400 mb-2">
-                  EVIDÊNCIAS
-                </p>
-
-                <div className="flex gap-2 overflow-x-auto pb-1">
-                  {fotosTemp.map(
-                    (
-                      file,
-                      index
-                    ) => {
-                      const preview =
-                        URL.createObjectURL(
-                          file
-                        );
-
-                      return (
-                        <div
-                          key={`${file.name}-${index}`}
-                          className="relative shrink-0"
-                        >
-                          <img
-                            src={
-                              preview
-                            }
-                            alt={`Preview ${
-                              index +
-                              1
-                            }`}
-                            className="
-                              w-20
-                              h-20
-                              rounded-xl
-                              object-cover
-                              border
-                              border-white
-                              shadow-sm
-                            "
-                          />
-
-                          <button
-                            onClick={() =>
-                              handleRemoveFoto(
-                                index
-                              )
-                            }
-                            className="
-                              absolute
-                              -top-1
-                              -right-1
-                              w-6
-                              h-6
-                              rounded-full
-                              bg-white
-                              shadow-md
-                              flex
-                              items-center
-                              justify-center
-                            "
-                            style={{
-                              color:
-                                COLORS.dark,
-                            }}
-                          >
-                            <XCircle
-                              size={18}
-                            />
-                          </button>
-                        </div>
-                      );
-                    }
-                  )}
-                </div>
-              </div>
-            )}
-
-            {/* ações */}
-
-            <div className="grid grid-cols-2 gap-2 mt-5">
-              <label
-                className="
-                  py-3
-                  rounded-xl
-                  bg-white/70
-                  border
-                  border-white
-                  flex
-                  items-center
-                  justify-center
-                  gap-2
-                  text-xs
-                  font-black
-                  text-slate-500
-                  cursor-pointer
-                "
-              >
-                <Camera
-                  size={17}
-                />
-                CÂMERA
-
-                <input
-                  type="file"
-                  accept="image/*"
-                  capture="environment"
-                  className="hidden"
-                  onChange={
-                    handleFileSelect
-                  }
-                />
-              </label>
-
-              <label
-                className="
-                  py-3
-                  rounded-xl
-                  bg-white/70
-                  border
-                  border-white
-                  flex
-                  items-center
-                  justify-center
-                  gap-2
-                  text-xs
-                  font-black
-                  text-slate-500
-                  cursor-pointer
-                "
-              >
-                <ImageIcon
-                  size={17}
-                />
-                GALERIA
-
-                <input
-                  type="file"
-                  accept="image/*"
-                  multiple
-                  className="hidden"
-                  onChange={
-                    handleFileSelect
-                  }
-                />
-              </label>
-            </div>
-
-            <button
-              onClick={() =>
-                void registrarAvaliacao(
-                  modalAberto ===
-                    "ressalva"
-                    ? "ressalva"
-                    : "nao_possui",
-                  obsTemp
-                )
-              }
-              disabled={
-                isSaving ||
-                (!obsTemp.trim() &&
-                  fotosTemp.length ===
-                    0)
-              }
-              className="
-                w-full
-                mt-3
-                py-4
-                rounded-xl
-                text-white
-                font-black
-                text-sm
-                flex
-                items-center
-                justify-center
-                gap-2
-                disabled:opacity-40
-                shadow-lg
-              "
-              style={{
-                background: `
-                  linear-gradient(
-                    135deg,
-                    ${COLORS.petrol},
-                    ${COLORS.dark}
-                  )
-                `,
-              }}
-            >
-              <Check size={19} />
-
-              {isSaving
-                ? "SALVANDO..."
-                : "CONCLUIR AVALIAÇÃO"}
-            </button>
-          </div>
+          <div className="absolute inset-0 bg-slate-900/20 backdrop-blur-sm" onClick={() => setIsMenuOpen(false)} />
+          <div className="absolute left-0 top-0 bottom-0">{topicListNav}</div>
         </div>
       )}
     </main>

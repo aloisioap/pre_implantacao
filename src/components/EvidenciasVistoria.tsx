@@ -3,16 +3,18 @@
 import {
   Camera,
   Image as ImageIcon,
+  Paperclip,
   Mic,
   MicOff,
+  Square,
+  Trash2,
   Play,
   Pause,
-  Trash2,
-  Check,
-  Sparkles,
-  Wand2,
+  FileText,
   Loader2,
+  CheckCircle2,
   X,
+  Volume2,
 } from "lucide-react";
 
 import {
@@ -22,142 +24,75 @@ import {
   type ChangeEvent,
 } from "react";
 
+import type {
+  Evidencia,
+  TranscricaoAudio,
+} from "@/types/vistoria";
+
 interface EvidenciasVistoriaProps {
   requisitoId: string;
 
-  observacao: string;
+  evidencias?: Evidencia[];
 
-  onObservacaoChange: (value: string) => void;
+  transcricao?: TranscricaoAudio;
 
-  fotos: File[];
+  observacao?: string;
 
-  onFotosChange: (files: File[]) => void;
+  onObservacaoChange?: (texto: string) => void;
 
-  audio?: Blob | null;
+  onEvidenciasChange?: (evidencias: Evidencia[]) => void;
 
-  onAudioChange?: (audio: Blob | null) => void;
+  onTranscricaoChange?: (
+    transcricao: TranscricaoAudio
+  ) => void;
 
-  transcricao?: string;
-
-  onTranscricaoChange?: (texto: string) => void;
+  disabled?: boolean;
 }
 
-type SpeechRecognitionEventLike = Event & {
-  results: {
-    [index: number]: {
-      [index: number]: {
-        transcript: string;
-      };
-    };
-  };
-};
-
-interface SpeechRecognitionInstance {
-  continuous: boolean;
-  interimResults: boolean;
-  lang: string;
-
-  start: () => void;
-  stop: () => void;
-
-  onstart: (() => void) | null;
-  onend: (() => void) | null;
-  onerror: ((event: unknown) => void) | null;
-  onresult:
-    | ((event: SpeechRecognitionEventLike) => void)
-    | null;
-}
-
-type SpeechRecognitionConstructor = new () => SpeechRecognitionInstance;
-
-declare global {
-  interface Window {
-    SpeechRecognition?: SpeechRecognitionConstructor;
-    webkitSpeechRecognition?: SpeechRecognitionConstructor;
-  }
-}
+type GravacaoEstado =
+  | "parado"
+  | "gravando"
+  | "processando";
 
 export default function EvidenciasVistoria({
   requisitoId,
-  observacao,
+  evidencias = [],
+  transcricao,
+  observacao = "",
   onObservacaoChange,
-  fotos,
-  onFotosChange,
-  audio,
-  onAudioChange,
-  transcricao = "",
+  onEvidenciasChange,
   onTranscricaoChange,
+  disabled = false,
 }: EvidenciasVistoriaProps) {
-  const [gravando, setGravando] = useState(false);
-  const [transcrevendo, setTranscrevendo] = useState(false);
+  const [gravacaoEstado, setGravacaoEstado] =
+    useState<GravacaoEstado>("parado");
 
-  const [duracao, setDuracao] = useState(0);
+  const [duracaoGravacao, setDuracaoGravacao] =
+    useState(0);
 
-  const [previewFotos, setPreviewFotos] = useState<
-    { file: File; url: string }[]
-  >([]);
+  const [audioPreview, setAudioPreview] =
+    useState<string | null>(null);
 
-  const [audioUrl, setAudioUrl] = useState<string | null>(
-    null
-  );
+  const [audioTocando, setAudioTocando] =
+    useState(false);
 
-  const [reproduzindo, setReproduzindo] = useState(false);
-
-  const [transcricaoTemporaria, setTranscricaoTemporaria] =
-    useState("");
+  const [erro, setErro] =
+    useState<string | null>(null);
 
   const mediaRecorderRef =
     useRef<MediaRecorder | null>(null);
 
-  const audioChunksRef = useRef<Blob[]>([]);
+  const audioChunksRef =
+    useRef<Blob[]>([]);
 
   const audioElementRef =
     useRef<HTMLAudioElement | null>(null);
-
-  const recognitionRef =
-    useRef<SpeechRecognitionInstance | null>(null);
 
   const timerRef =
     useRef<ReturnType<typeof setInterval> | null>(null);
 
   /**
-   * Gera previews das fotos.
-   */
-  useEffect(() => {
-    const previews = fotos.map((file) => ({
-      file,
-      url: URL.createObjectURL(file),
-    }));
-
-    setPreviewFotos(previews);
-
-    return () => {
-      previews.forEach((preview) =>
-        URL.revokeObjectURL(preview.url)
-      );
-    };
-  }, [fotos]);
-
-  /**
-   * Cria URL temporária do áudio.
-   */
-  useEffect(() => {
-    if (!audio) {
-      setAudioUrl(null);
-      return;
-    }
-
-    const url = URL.createObjectURL(audio);
-
-    setAudioUrl(url);
-
-    return () => {
-      URL.revokeObjectURL(url);
-    };
-  }, [audio]);
-
-  /**
-   * Limpa timer.
+   * Limpa o timer quando o componente é desmontado.
    */
   useEffect(() => {
     return () => {
@@ -165,45 +100,116 @@ export default function EvidenciasVistoria({
         clearInterval(timerRef.current);
       }
 
-      recognitionRef.current?.stop();
+      if (audioPreview) {
+        URL.revokeObjectURL(audioPreview);
+      }
     };
-  }, []);
+  }, [audioPreview]);
 
   /**
-   * Fotos.
+   * Formata segundos para MM:SS.
    */
-  const handleFotos = (
-    event: ChangeEvent<HTMLInputElement>
+  const formatarDuracao = (segundos: number) => {
+    const minutos = Math.floor(segundos / 60);
+    const segundosRestantes = segundos % 60;
+
+    return `${String(minutos).padStart(2, "0")}:${String(
+      segundosRestantes
+    ).padStart(2, "0")}`;
+  };
+
+  /**
+   * Adiciona evidências ao estado do componente pai.
+   */
+  const adicionarEvidencias = (
+    novasEvidencias: Evidencia[]
   ) => {
-    const files = event.target.files;
+    onEvidenciasChange?.([
+      ...evidencias,
+      ...novasEvidencias,
+    ]);
+  };
 
-    if (!files) return;
-
-    const novasFotos = Array.from(files).filter((file) =>
-      file.type.startsWith("image/")
+  /**
+   * Remove uma evidência.
+   */
+  const removerEvidencia = (id: string) => {
+    const evidencia = evidencias.find(
+      (item) => item.id === id
     );
 
-    onFotosChange([...fotos, ...novasFotos]);
+    if (evidencia?.url) {
+      /*
+       * Só revoga URLs blob locais.
+       * URLs do Supabase não devem ser revogadas.
+       */
+      if (evidencia.url.startsWith("blob:")) {
+        URL.revokeObjectURL(evidencia.url);
+      }
+    }
 
+    onEvidenciasChange?.(
+      evidencias.filter(
+        (item) => item.id !== id
+      )
+    );
+  };
+
+  /**
+   * Processa fotos e arquivos selecionados.
+   */
+  const handleArquivos = (
+    event: ChangeEvent<HTMLInputElement>
+  ) => {
+    const arquivos = event.target.files;
+
+    if (!arquivos || arquivos.length === 0) {
+      return;
+    }
+
+    setErro(null);
+
+    const novasEvidencias: Evidencia[] =
+      Array.from(arquivos).map((arquivo) => {
+        const url = URL.createObjectURL(arquivo);
+
+        const tipo: Evidencia["tipo"] =
+          arquivo.type.startsWith("image/")
+            ? "foto"
+            : "arquivo";
+
+        return {
+          id: crypto.randomUUID(),
+          tipo,
+          url,
+          nome: arquivo.name,
+          mimeType: arquivo.type,
+          tamanho: arquivo.size,
+          timestamp: new Date().toISOString(),
+        };
+      });
+
+    adicionarEvidencias(novasEvidencias);
+
+    /*
+     * Permite selecionar novamente o mesmo arquivo.
+     */
     event.target.value = "";
   };
 
-  const removerFoto = (index: number) => {
-    const novasFotos = fotos.filter(
-      (_, fotoIndex) => fotoIndex !== index
-    );
-
-    onFotosChange(novasFotos);
-  };
-
   /**
-   * Gravação de áudio.
+   * Inicia a gravação do áudio.
    */
   const iniciarGravacao = async () => {
     try {
-      if (!navigator.mediaDevices?.getUserMedia) {
-        alert(
-          "Seu navegador não permite gravação de áudio."
+      setErro(null);
+
+      if (
+        typeof navigator === "undefined" ||
+        !navigator.mediaDevices?.getUserMedia
+      ) {
+        setErro(
+          "Seu navegador não suporta gravação de áudio."
         );
         return;
       }
@@ -213,13 +219,37 @@ export default function EvidenciasVistoria({
           audio: true,
         });
 
-      const recorder = new MediaRecorder(stream);
+      let mimeType = "";
 
+      if (
+        MediaRecorder.isTypeSupported(
+          "audio/webm;codecs=opus"
+        )
+      ) {
+        mimeType = "audio/webm;codecs=opus";
+      } else if (
+        MediaRecorder.isTypeSupported("audio/webm")
+      ) {
+        mimeType = "audio/webm";
+      } else if (
+        MediaRecorder.isTypeSupported("audio/mp4")
+      ) {
+        mimeType = "audio/mp4";
+      }
+
+      const recorder = new MediaRecorder(
+        stream,
+        mimeType ? { mimeType } : undefined
+      );
+
+      mediaRecorderRef.current = recorder;
       audioChunksRef.current = [];
 
       recorder.ondataavailable = (event) => {
         if (event.data.size > 0) {
-          audioChunksRef.current.push(event.data);
+          audioChunksRef.current.push(
+            event.data
+          );
         }
       };
 
@@ -233,39 +263,96 @@ export default function EvidenciasVistoria({
           }
         );
 
-        onAudioChange?.(blob);
+        const url =
+          URL.createObjectURL(blob);
 
-        stream.getTracks().forEach((track) =>
-          track.stop()
-        );
+        setAudioPreview(url);
+
+        const novaEvidencia: Evidencia = {
+          id: crypto.randomUUID(),
+          tipo: "audio",
+          url,
+          nome: `vistoria-${requisitoId}-${Date.now()}.webm`,
+          mimeType:
+            recorder.mimeType ||
+            "audio/webm",
+          tamanho: blob.size,
+          duracao: duracaoGravacao,
+          timestamp:
+            new Date().toISOString(),
+        };
+
+        adicionarEvidencias([
+          novaEvidencia,
+        ]);
+
+        /*
+         * Aqui NÃO fazemos a transcrição ainda.
+         *
+         * No próximo passo:
+         *
+         * áudio
+         * ↓
+         * Supabase Storage
+         * ↓
+         * Edge Function
+         * ↓
+         * Speech-to-Text
+         */
+        onTranscricaoChange?.({
+          texto: "",
+          status: "pendente",
+          evidenciaId:
+            novaEvidencia.id,
+          timestamp:
+            new Date().toISOString(),
+        });
+
+        stream
+          .getTracks()
+          .forEach((track) =>
+            track.stop()
+          );
+
+        setGravacaoEstado("parado");
       };
 
       recorder.start();
 
-      mediaRecorderRef.current = recorder;
+      setDuracaoGravacao(0);
+      setGravacaoEstado("gravando");
 
-      setGravando(true);
-      setDuracao(0);
-
-      timerRef.current = setInterval(() => {
-        setDuracao((valor) => valor + 1);
-      }, 1000);
+      timerRef.current =
+        setInterval(() => {
+          setDuracaoGravacao(
+            (valor) => valor + 1
+          );
+        }, 1000);
     } catch (error) {
       console.error(
-        "Erro ao iniciar gravação:",
+        "Erro ao acessar microfone:",
         error
       );
 
-      alert(
-        "Não foi possível acessar o microfone."
+      setErro(
+        "Não foi possível acessar o microfone. Verifique a permissão do navegador."
       );
+
+      setGravacaoEstado("parado");
     }
   };
 
+  /**
+   * Finaliza a gravação.
+   */
   const pararGravacao = () => {
-    mediaRecorderRef.current?.stop();
-
-    setGravando(false);
+    if (
+      mediaRecorderRef.current &&
+      mediaRecorderRef.current.state !==
+        "inactive"
+    ) {
+      mediaRecorderRef.current.stop();
+    }
 
     if (timerRef.current) {
       clearInterval(timerRef.current);
@@ -274,289 +361,158 @@ export default function EvidenciasVistoria({
   };
 
   /**
-   * Speech-to-text.
-   *
-   * O navegador transforma a fala em texto.
+   * Alterna gravação.
    */
-  const iniciarTranscricao = () => {
-    if (transcrevendo) {
-      recognitionRef.current?.stop();
-      setTranscrevendo(false);
-      return;
+  const alternarGravacao = () => {
+    if (disabled) return;
+
+    if (gravacaoEstado === "gravando") {
+      pararGravacao();
+    } else {
+      iniciarGravacao();
     }
-
-    const Recognition =
-      window.SpeechRecognition ||
-      window.webkitSpeechRecognition;
-
-    if (!Recognition) {
-      alert(
-        "A transcrição de voz não está disponível neste navegador. Use Chrome ou Edge."
-      );
-
-      return;
-    }
-
-    const recognition = new Recognition();
-
-    recognition.lang = "pt-BR";
-
-    recognition.continuous = true;
-
-    recognition.interimResults = true;
-
-    recognition.onstart = () => {
-      setTranscrevendo(true);
-      setTranscricaoTemporaria("");
-    };
-
-    recognition.onresult = (event) => {
-      let textoFinal = "";
-      let textoIntermediario = "";
-
-      for (
-        let i = 0;
-        i < Object.keys(event.results).length;
-        i++
-      ) {
-        const resultado = event.results[i];
-
-        if (!resultado) continue;
-
-        const texto =
-          resultado[0]?.transcript || "";
-
-        /**
-         * O primeiro índice representa
-         * o resultado principal.
-         */
-        if (texto) {
-          textoIntermediario += `${texto} `;
-        }
-      }
-
-      textoFinal = textoIntermediario.trim();
-
-      setTranscricaoTemporaria(textoFinal);
-    };
-
-    recognition.onerror = (event) => {
-      console.error(
-        "Erro na transcrição:",
-        event
-      );
-
-      setTranscrevendo(false);
-    };
-
-    recognition.onend = () => {
-      setTranscrevendo(false);
-    };
-
-    recognitionRef.current = recognition;
-
-    recognition.start();
   };
 
   /**
-   * Insere texto reconhecido nas observações.
+   * Reproduz / pausa áudio.
    */
-  const inserirTranscricao = () => {
-    const texto =
-      transcricaoTemporaria || transcricao;
+  const alternarAudio = () => {
+    if (!audioElementRef.current) {
+      return;
+    }
 
-    if (!texto.trim()) return;
-
-    const novaObservacao = observacao.trim()
-      ? `${observacao.trim()}\n\n${texto.trim()}`
-      : texto.trim();
-
-    onObservacaoChange(novaObservacao);
-
-    onTranscricaoChange?.(texto.trim());
-
-    setTranscricaoTemporaria("");
-  };
-
-  const apagarAudio = () => {
-    onAudioChange?.(null);
-    setReproduzindo(false);
-  };
-
-  const toggleAudio = () => {
-    const audioElement =
-      audioElementRef.current;
-
-    if (!audioElement) return;
-
-    if (reproduzindo) {
-      audioElement.pause();
-      setReproduzindo(false);
+    if (audioTocando) {
+      audioElementRef.current.pause();
+      setAudioTocando(false);
     } else {
-      audioElement.play();
-      setReproduzindo(true);
+      audioElementRef.current.play();
+      setAudioTocando(true);
     }
   };
 
-  const formatarTempo = (segundos: number) => {
-    const minutos = Math.floor(segundos / 60);
+  /**
+   * Remove somente a última gravação local.
+   */
+  const cancelarAudioPreview = () => {
+    if (audioPreview) {
+      URL.revokeObjectURL(audioPreview);
+    }
 
-    const segundosRestantes =
-      segundos % 60;
-
-    return `${String(minutos).padStart(
-      2,
-      "0"
-    )}:${String(segundosRestantes).padStart(
-      2,
-      "0"
-    )}`;
+    setAudioPreview(null);
+    setAudioTocando(false);
   };
 
+  const imagens = evidencias.filter(
+    (evidencia) =>
+      evidencia.tipo === "foto"
+  );
+
+  const arquivos = evidencias.filter(
+    (evidencia) =>
+      evidencia.tipo === "arquivo"
+  );
+
+  const audios = evidencias.filter(
+    (evidencia) =>
+      evidencia.tipo === "audio"
+  );
+
   return (
-    <section
-      className="
-        relative
-        overflow-hidden
-        rounded-[28px]
-        border
-        border-[#9AD3E1]/40
-        bg-white/70
-        backdrop-blur-xl
-        shadow-[0_15px_50px_rgba(28,133,168,0.08)]
-        p-4
-        sm:p-5
-      "
-    >
-      {/* AQUARELA DE FUNDO */}
-      <div
-        className="
-          pointer-events-none
-          absolute
-          -top-24
-          -right-24
-          w-64
-          h-64
-          rounded-full
-          bg-[#43C3BC]/10
-          blur-3xl
-        "
-      />
+    <div className="mt-5 space-y-4">
+
+      {/* ================================================= */}
+      {/* ÁREA DE EVIDÊNCIAS */}
+      {/* ================================================= */}
 
       <div
         className="
-          pointer-events-none
-          absolute
-          -bottom-24
-          -left-24
-          w-64
-          h-64
-          rounded-full
-          bg-[#81CDEB]/15
-          blur-3xl
+          rounded-3xl
+          border border-white/60
+          bg-white/55
+          backdrop-blur-xl
+          shadow-[0_10px_40px_rgba(28,133,168,0.08)]
+          p-4
         "
-      />
+      >
 
-      <div className="relative z-10">
-
-        {/* CABEÇALHO */}
         <div className="flex items-center justify-between mb-3">
           <div>
-            <p
-              className="
-                text-[10px]
-                uppercase
-                tracking-[0.18em]
-                font-bold
-                text-[#1C85A8]/70
-              "
-            >
+            <p className="text-xs font-black tracking-[0.18em] uppercase text-[#1C85A8]">
               Evidências
             </p>
 
-            <p className="text-sm font-semibold text-[#1C85A8]">
-              Registro técnico
+            <p className="text-[11px] text-slate-500 mt-0.5">
+              Registre o que foi encontrado em campo
             </p>
           </div>
 
-          <Sparkles
-            size={18}
-            className="text-[#43C3BC]"
-          />
+          {evidencias.length > 0 && (
+            <span
+              className="
+                px-2.5 py-1
+                rounded-full
+                bg-[#9AD3E1]/25
+                text-[#1C85A8]
+                text-[10px]
+                font-black
+              "
+            >
+              {evidencias.length}
+            </span>
+          )}
         </div>
 
-        {/* OBSERVAÇÃO */}
-        <textarea
-          value={observacao}
-          onChange={(event) =>
-            onObservacaoChange(
-              event.target.value
-            )
-          }
-          placeholder="Descreva a situação encontrada..."
-          className="
-            w-full
-            min-h-[100px]
-            resize-none
-            rounded-2xl
-            border
-            border-[#9AD3E1]/50
-            bg-[#F7FCFD]/80
-            px-4
-            py-3
-            text-sm
-            text-[#1C85A8]
-            placeholder:text-[#1C85A8]/40
-            outline-none
-            transition
-            focus:border-[#43C3BC]
-            focus:ring-4
-            focus:ring-[#43C3BC]/10
-          "
-        />
+        {/* ============================================= */}
+        {/* BOTÕES */}
+        {/* ============================================= */}
 
-        {/* LINHA DE AÇÕES */}
-        <div className="
-          grid
-          grid-cols-3
-          gap-2
-          mt-3
-        ">
+        <div className="grid grid-cols-3 gap-2">
 
           {/* CÂMERA */}
           <label
-            className="
-              group
+            className={`
               relative
-              overflow-hidden
               cursor-pointer
-              min-h-[64px]
+              overflow-hidden
               rounded-2xl
-              border
-              border-[#43C3BC]/30
-              bg-gradient-to-br
-              from-[#43C3BC]/20
-              to-[#9AD3E1]/20
+              p-3
+              min-h-[78px]
               flex
               flex-col
               items-center
               justify-center
-              gap-1
+              gap-1.5
+              border
+              border-[#81CDEB]/40
+              bg-gradient-to-br
+              from-[#9AD3E1]/30
+              to-[#54B4E7]/10
               text-[#1C85A8]
+              shadow-[inset_0_1px_0_rgba(255,255,255,.7)]
               transition-all
               hover:-translate-y-0.5
               hover:shadow-lg
-              hover:shadow-[#43C3BC]/10
-              active:scale-[0.98]
-            "
+              active:scale-95
+              ${disabled ? "opacity-50 pointer-events-none" : ""}
+            `}
           >
-            <Camera
-              size={22}
-              strokeWidth={2}
+            <span
+              className="
+                absolute
+                -right-4
+                -top-5
+                w-14
+                h-14
+                rounded-full
+                bg-[#81CDEB]/20
+                blur-xl
+              "
             />
 
-            <span className="text-xs font-bold">
-              Câmera
+            <Camera size={22} />
+
+            <span className="text-[10px] font-black tracking-wide">
+              CÂMERA
             </span>
 
             <input
@@ -564,44 +520,55 @@ export default function EvidenciasVistoria({
               accept="image/*"
               capture="environment"
               className="hidden"
-              onChange={handleFotos}
+              onChange={handleArquivos}
+              disabled={disabled}
             />
           </label>
 
           {/* GALERIA */}
           <label
-            className="
-              group
+            className={`
               relative
-              overflow-hidden
               cursor-pointer
-              min-h-[64px]
+              overflow-hidden
               rounded-2xl
-              border
-              border-[#54B4E7]/30
-              bg-gradient-to-br
-              from-[#81CDEB]/20
-              to-[#54B4E7]/10
+              p-3
+              min-h-[78px]
               flex
               flex-col
               items-center
               justify-center
-              gap-1
+              gap-1.5
+              border
+              border-[#43C3BC]/35
+              bg-gradient-to-br
+              from-[#43C3BC]/18
+              to-[#84CAD8]/10
               text-[#1C85A8]
               transition-all
               hover:-translate-y-0.5
               hover:shadow-lg
-              hover:shadow-[#54B4E7]/10
-              active:scale-[0.98]
-            "
+              active:scale-95
+              ${disabled ? "opacity-50 pointer-events-none" : ""}
+            `}
           >
-            <ImageIcon
-              size={22}
-              strokeWidth={2}
+            <span
+              className="
+                absolute
+                -left-4
+                -bottom-5
+                w-16
+                h-16
+                rounded-full
+                bg-[#43C3BC]/15
+                blur-xl
+              "
             />
 
-            <span className="text-xs font-bold">
-              Galeria
+            <ImageIcon size={22} />
+
+            <span className="text-[10px] font-black tracking-wide">
+              GALERIA
             </span>
 
             <input
@@ -609,428 +576,627 @@ export default function EvidenciasVistoria({
               accept="image/*"
               multiple
               className="hidden"
-              onChange={handleFotos}
+              onChange={handleArquivos}
+              disabled={disabled}
             />
           </label>
 
-          {/* VOZ */}
+          {/* ÁUDIO */}
           <button
             type="button"
-            onClick={
-              gravando
-                ? pararGravacao
-                : iniciarGravacao
-            }
+            onClick={alternarGravacao}
+            disabled={disabled}
             className={`
               relative
               overflow-hidden
-              min-h-[64px]
               rounded-2xl
-              border
+              p-3
+              min-h-[78px]
               flex
               flex-col
               items-center
               justify-center
-              gap-1
+              gap-1.5
+              border
               transition-all
-              active:scale-[0.98]
-
+              active:scale-95
               ${
-                gravando
+                gravacaoEstado ===
+                "gravando"
                   ? `
-                    border-red-300
-                    bg-red-50
-                    text-red-600
+                    border-[#1C85A8]/50
+                    bg-[#1C85A8]/10
+                    text-[#1C85A8]
+                    shadow-[0_0_25px_rgba(28,133,168,.18)]
                   `
                   : `
-                    border-[#1C85A8]/20
+                    border-[#54B4E7]/35
                     bg-gradient-to-br
-                    from-[#1C85A8]/10
+                    from-[#54B4E7]/15
                     to-[#43C3BC]/10
                     text-[#1C85A8]
                     hover:-translate-y-0.5
                     hover:shadow-lg
                   `
               }
+              ${
+                disabled
+                  ? "opacity-50"
+                  : ""
+              }
             `}
           >
-            {gravando ? (
+            {gravacaoEstado ===
+            "gravando" ? (
               <>
-                <MicOff size={22} />
+                <span
+                  className="
+                    absolute
+                    inset-2
+                    rounded-xl
+                    border
+                    border-[#1C85A8]/20
+                    animate-pulse
+                  "
+                />
 
-                <span className="text-xs font-bold">
-                  Parar
+                <Square
+                  size={19}
+                  fill="currentColor"
+                />
+
+                <span className="text-[10px] font-black tracking-wide">
+                  PARAR
+                </span>
+
+                <span className="text-[9px] font-bold opacity-70">
+                  {formatarDuracao(
+                    duracaoGravacao
+                  )}
                 </span>
               </>
             ) : (
               <>
                 <Mic size={22} />
 
-                <span className="text-xs font-bold">
-                  Gravar voz
+                <span className="text-[10px] font-black tracking-wide">
+                  ÁUDIO
+                </span>
+
+                <span className="text-[9px] opacity-60">
+                  Gravar
                 </span>
               </>
             )}
           </button>
         </div>
 
-        {/* INDICADOR DE GRAVAÇÃO */}
-        {gravando && (
+        {/* ============================================= */}
+        {/* BOTÃO ARQUIVO */}
+        {/* ============================================= */}
+
+        <label
+          className={`
+            mt-2
+            flex
+            items-center
+            justify-center
+            gap-2
+            py-2.5
+            rounded-xl
+            border
+            border-dashed
+            border-[#84CAD8]/50
+            bg-white/40
+            text-[#1C85A8]
+            text-[10px]
+            font-bold
+            cursor-pointer
+            transition-all
+            hover:bg-white/70
+            ${
+              disabled
+                ? "opacity-50 pointer-events-none"
+                : ""
+            }
+          `}
+        >
+          <Paperclip size={15} />
+          ANEXAR ARQUIVO / DOCUMENTO
+
+          <input
+            type="file"
+            multiple
+            className="hidden"
+            onChange={handleArquivos}
+            disabled={disabled}
+          />
+        </label>
+
+        {/* ============================================= */}
+        {/* ERRO */}
+        {/* ============================================= */}
+
+        {erro && (
           <div
             className="
               mt-3
-              rounded-2xl
-              border
-              border-red-200
-              bg-red-50/70
-              px-4
-              py-3
               flex
-              items-center
-              justify-between
-            "
-          >
-            <div className="flex items-center gap-3">
-              <span
-                className="
-                  w-3
-                  h-3
-                  rounded-full
-                  bg-red-500
-                  animate-pulse
-                "
-              />
-
-              <div>
-                <p className="text-xs font-bold text-red-600">
-                  GRAVANDO ÁUDIO
-                </p>
-
-                <p className="text-[11px] text-red-500/70">
-                  Fale normalmente para registrar
-                  a evidência.
-                </p>
-              </div>
-            </div>
-
-            <span className="font-mono text-sm font-bold text-red-600">
-              {formatarTempo(duracao)}
-            </span>
-          </div>
-        )}
-
-        {/* PREVIEW DAS FOTOS */}
-        {previewFotos.length > 0 && (
-          <div className="mt-4">
-            <div className="flex items-center justify-between mb-2">
-              <span className="text-xs font-bold text-[#1C85A8]">
-                FOTOS REGISTRADAS
-              </span>
-
-              <span className="text-[10px] text-[#1C85A8]/50">
-                {previewFotos.length} arquivo(s)
-              </span>
-            </div>
-
-            <div className="flex gap-2 overflow-x-auto pb-1">
-              {previewFotos.map(
-                (preview, index) => (
-                  <div
-                    key={`${preview.file.name}-${index}`}
-                    className="
-                      relative
-                      shrink-0
-                      w-20
-                      h-20
-                      rounded-xl
-                      overflow-hidden
-                      border
-                      border-[#9AD3E1]/50
-                      shadow-sm
-                    "
-                  >
-                    <img
-                      src={preview.url}
-                      alt={`Evidência ${index + 1}`}
-                      className="
-                        w-full
-                        h-full
-                        object-cover
-                      "
-                    />
-
-                    <button
-                      type="button"
-                      onClick={() =>
-                        removerFoto(index)
-                      }
-                      className="
-                        absolute
-                        top-1
-                        right-1
-                        w-6
-                        h-6
-                        rounded-full
-                        bg-white/90
-                        text-red-500
-                        flex
-                        items-center
-                        justify-center
-                        shadow
-                      "
-                    >
-                      <X size={13} />
-                    </button>
-                  </div>
-                )
-              )}
-            </div>
-          </div>
-        )}
-
-        {/* ÁUDIO */}
-        {audio && audioUrl && (
-          <div
-            className="
-              mt-4
-              rounded-2xl
-              border
-              border-[#43C3BC]/25
-              bg-[#43C3BC]/5
+              items-start
+              gap-2
               p-3
-              flex
-              items-center
-              gap-3
+              rounded-xl
+              bg-red-50
+              border
+              border-red-100
+              text-red-600
+              text-xs
             "
           >
+            <X size={15} className="shrink-0 mt-0.5" />
+
+            <span>{erro}</span>
+          </div>
+        )}
+
+      </div>
+
+      {/* ================================================= */}
+      {/* ÁUDIO GRAVADO */}
+      {/* ================================================= */}
+
+      {audioPreview && (
+        <div
+          className="
+            rounded-2xl
+            border
+            border-[#43C3BC]/25
+            bg-gradient-to-r
+            from-[#43C3BC]/10
+            to-[#9AD3E1]/15
+            p-3
+          "
+        >
+          <div className="flex items-center gap-3">
+
             <button
               type="button"
-              onClick={toggleAudio}
+              onClick={alternarAudio}
               className="
-                w-11
-                h-11
+                w-10
+                h-10
                 rounded-full
-                bg-[#43C3BC]
-                text-white
                 flex
                 items-center
                 justify-center
-                shadow-lg
-                shadow-[#43C3BC]/20
+                bg-[#1C85A8]
+                text-white
+                shadow-md
+                active:scale-95
               "
             >
-              {reproduzindo ? (
-                <Pause size={18} />
+              {audioTocando ? (
+                <Pause size={17} />
               ) : (
-                <Play size={18} />
+                <Play size={17} className="ml-0.5" />
               )}
             </button>
 
-            <audio
-              ref={audioElementRef}
-              src={audioUrl}
-              onEnded={() =>
-                setReproduzindo(false)
-              }
-              className="hidden"
-            />
-
-            <div className="flex-1">
-              <p className="text-xs font-bold text-[#1C85A8]">
-                Áudio da vistoria
+            <div className="flex-1 min-w-0">
+              <p className="text-xs font-black text-[#1C85A8]">
+                Áudio registrado
               </p>
 
-              <p className="text-[10px] text-[#1C85A8]/50">
-                Evidência sonora registrada
+              <p className="text-[10px] text-slate-500">
+                {formatarDuracao(
+                  duracaoGravacao
+                )}
+                {" • "}
+                aguardando transcrição
               </p>
             </div>
 
             <button
               type="button"
-              onClick={apagarAudio}
+              onClick={cancelarAudioPreview}
               className="
                 p-2
-                rounded-xl
-                text-red-400
-                hover:bg-red-50
+                rounded-lg
+                text-slate-400
+                hover:text-red-500
               "
             >
               <Trash2 size={16} />
             </button>
           </div>
-        )}
 
-        {/* TRANSCRIÇÃO */}
+          <audio
+            ref={audioElementRef}
+            src={audioPreview}
+            onEnded={() =>
+              setAudioTocando(false)
+            }
+            className="hidden"
+          />
+        </div>
+      )}
+
+      {/* ================================================= */}
+      {/* TRANSCRIÇÃO */}
+      {/* ================================================= */}
+
+      {transcricao && (
         <div
           className="
-            mt-4
             rounded-2xl
             border
-            border-[#84CAD8]/40
-            bg-gradient-to-br
-            from-white/80
-            to-[#9AD3E1]/10
+            border-[#81CDEB]/30
+            bg-white/65
+            backdrop-blur-xl
             p-4
           "
         >
-          <div className="flex items-center justify-between gap-3">
-            <div className="flex items-center gap-2">
-              <div
-                className="
-                  w-8
-                  h-8
-                  rounded-xl
-                  bg-[#43C3BC]/15
-                  text-[#1C85A8]
-                  flex
-                  items-center
-                  justify-center
-                "
-              >
-                <Wand2 size={16} />
-              </div>
+          <div className="flex items-center gap-2 mb-3">
 
-              <div>
-                <p className="text-xs font-bold text-[#1C85A8]">
-                  Transcrição inteligente
-                </p>
+            {transcricao.status ===
+            "processando" ? (
+              <Loader2
+                size={16}
+                className="text-[#1C85A8] animate-spin"
+              />
+            ) : transcricao.status ===
+              "concluida" ? (
+              <CheckCircle2
+                size={16}
+                className="text-[#43C3BC]"
+              />
+            ) : (
+              <Volume2
+                size={16}
+                className="text-[#54B4E7]"
+              />
+            )}
 
-                <p className="text-[10px] text-[#1C85A8]/50">
-                  Fale e transforme em observação
-                </p>
-              </div>
-            </div>
+            <span className="text-xs font-black text-[#1C85A8]">
+              TRANSCRIÇÃO
+            </span>
 
-            <button
-              type="button"
-              onClick={iniciarTranscricao}
-              className={`
-                px-3
-                py-2
-                rounded-xl
-                text-xs
-                font-bold
-                flex
-                items-center
-                gap-2
-                transition
+            {transcricao.status ===
+              "processando" && (
+              <span className="text-[10px] text-slate-400">
+                Processando...
+              </span>
+            )}
 
-                ${
-                  transcrevendo
-                    ? `
-                      bg-[#1C85A8]
-                      text-white
-                    `
-                    : `
-                      bg-[#43C3BC]/10
-                      text-[#1C85A8]
-                      hover:bg-[#43C3BC]/20
-                    `
-                }
-              `}
-            >
-              {transcrevendo ? (
-                <>
-                  <Loader2
-                    size={14}
-                    className="animate-spin"
-                  />
-
-                  Ouvindo...
-                </>
-              ) : (
-                <>
-                  <Mic size={14} />
-
-                  Transcrever
-                </>
-              )}
-            </button>
+            {transcricao.status ===
+              "pendente" && (
+              <span className="text-[10px] text-slate-400">
+                Aguardando processamento
+              </span>
+            )}
           </div>
 
-          {/* TEXTO DA TRANSCRIÇÃO */}
-          {(transcricaoTemporaria ||
-            transcricao) && (
-            <div className="mt-3">
+          {transcricao.texto ? (
+            <textarea
+              value={transcricao.texto}
+              onChange={(event) =>
+                onTranscricaoChange?.({
+                  ...transcricao,
+                  texto:
+                    event.target.value,
+                })
+              }
+              className="
+                w-full
+                min-h-[90px]
+                resize-none
+                bg-[#9AD3E1]/8
+                border
+                border-[#84CAD8]/20
+                rounded-xl
+                p-3
+                text-sm
+                text-slate-700
+                outline-none
+                focus:ring-2
+                focus:ring-[#54B4E7]/30
+              "
+              placeholder="A transcrição aparecerá aqui..."
+            />
+          ) : (
+            <div className="flex items-center gap-2 text-xs text-slate-400">
+              <Loader2
+                size={14}
+                className={
+                  transcricao.status ===
+                  "processando"
+                    ? "animate-spin"
+                    : ""
+                }
+              />
+
+              Aguardando transcrição do áudio...
+            </div>
+          )}
+
+          {transcricao.erro && (
+            <p className="mt-2 text-xs text-red-500">
+              {transcricao.erro}
+            </p>
+          )}
+        </div>
+      )}
+
+      {/* ================================================= */}
+      {/* OBSERVAÇÃO */}
+      {/* ================================================= */}
+
+      <div
+        className="
+          rounded-2xl
+          border
+          border-white/70
+          bg-white/45
+          backdrop-blur-lg
+          p-4
+        "
+      >
+        <div className="flex items-center gap-2 mb-2">
+          <FileText
+            size={16}
+            className="text-[#1C85A8]"
+          />
+
+          <span className="text-xs font-black text-[#1C85A8]">
+            OBSERVAÇÃO TÉCNICA
+          </span>
+        </div>
+
+        <textarea
+          value={observacao}
+          onChange={(event) =>
+            onObservacaoChange?.(
+              event.target.value
+            )
+          }
+          disabled={disabled}
+          placeholder="Descreva a condição encontrada, medidas, valores, não conformidades ou observações relevantes..."
+          className="
+            w-full
+            min-h-[90px]
+            resize-none
+            rounded-xl
+            bg-white/60
+            border
+            border-[#84CAD8]/20
+            p-3
+            text-sm
+            text-slate-700
+            outline-none
+            placeholder:text-slate-400
+            focus:bg-white/80
+            focus:ring-2
+            focus:ring-[#54B4E7]/25
+          "
+        />
+      </div>
+
+      {/* ================================================= */}
+      {/* GALERIA DE EVIDÊNCIAS */}
+      {/* ================================================= */}
+
+      {(imagens.length > 0 ||
+        arquivos.length > 0 ||
+        audios.length > 0) && (
+        <div
+          className="
+            rounded-2xl
+            border
+            border-[#9AD3E1]/30
+            bg-white/45
+            backdrop-blur-lg
+            p-4
+          "
+        >
+          <div className="flex items-center gap-2 mb-3">
+            <ImageIcon
+              size={15}
+              className="text-[#1C85A8]"
+            />
+
+            <span className="text-xs font-black text-[#1C85A8]">
+              REGISTROS
+            </span>
+          </div>
+
+          <div className="flex flex-wrap gap-2">
+
+            {imagens.map((evidencia) => (
               <div
+                key={evidencia.id}
                 className="
+                  relative
+                  w-20
+                  h-20
                   rounded-xl
-                  bg-white/70
+                  overflow-hidden
                   border
-                  border-[#9AD3E1]/40
+                  border-white
+                  shadow-sm
+                  group
+                "
+              >
+                <img
+                  src={evidencia.url}
+                  alt={
+                    evidencia.nome ||
+                    "Evidência da vistoria"
+                  }
+                  className="
+                    w-full
+                    h-full
+                    object-cover
+                  "
+                />
+
+                <button
+                  type="button"
+                  onClick={() =>
+                    removerEvidencia(
+                      evidencia.id
+                    )
+                  }
+                  className="
+                    absolute
+                    top-1
+                    right-1
+                    w-6
+                    h-6
+                    rounded-full
+                    bg-black/50
+                    text-white
+                    flex
+                    items-center
+                    justify-center
+                  "
+                >
+                  <X size={12} />
+                </button>
+              </div>
+            ))}
+
+            {arquivos.map((evidencia) => (
+              <div
+                key={evidencia.id}
+                className="
+                  relative
+                  w-20
+                  h-20
+                  rounded-xl
+                  border
+                  border-[#84CAD8]/30
+                  bg-white/70
+                  flex
+                  flex-col
+                  items-center
+                  justify-center
+                  gap-1
+                  p-2
+                "
+              >
+                <FileText
+                  size={22}
+                  className="text-[#1C85A8]"
+                />
+
+                <span
+                  className="
+                    text-[8px]
+                    text-slate-500
+                    text-center
+                    truncate
+                    w-full
+                  "
+                >
+                  {evidencia.nome}
+                </span>
+
+                <button
+                  type="button"
+                  onClick={() =>
+                    removerEvidencia(
+                      evidencia.id
+                    )
+                  }
+                  className="
+                    absolute
+                    top-1
+                    right-1
+                    text-slate-400
+                    hover:text-red-500
+                  "
+                >
+                  <X size={12} />
+                </button>
+              </div>
+            ))}
+
+            {audios.map((evidencia) => (
+              <div
+                key={evidencia.id}
+                className="
+                  relative
+                  min-w-[180px]
+                  rounded-xl
+                  border
+                  border-[#43C3BC]/25
+                  bg-[#43C3BC]/8
                   p-3
                 "
               >
-                <p className="text-[10px] uppercase tracking-wider font-bold text-[#43C3BC] mb-1">
-                  Texto convertido
-                </p>
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const audio =
+                        new Audio(
+                          evidencia.url
+                        );
 
-                <p className="text-sm text-[#1C85A8] leading-relaxed">
-                  {transcricaoTemporaria ||
-                    transcricao}
-                </p>
+                      audio.play();
+                    }}
+                    className="
+                      w-8
+                      h-8
+                      rounded-full
+                      bg-[#1C85A8]
+                      text-white
+                      flex
+                      items-center
+                      justify-center
+                    "
+                  >
+                    <Play
+                      size={13}
+                      className="ml-0.5"
+                    />
+                  </button>
+
+                  <div className="min-w-0">
+                    <p className="text-[10px] font-black text-[#1C85A8]">
+                      Áudio
+                    </p>
+
+                    <p className="text-[9px] text-slate-400 truncate">
+                      {formatarDuracao(
+                        evidencia.duracao ||
+                          0
+                      )}
+                    </p>
+                  </div>
+
+                  <button
+                    type="button"
+                    onClick={() =>
+                      removerEvidencia(
+                        evidencia.id
+                      )
+                    }
+                    className="
+                      ml-auto
+                      text-slate-400
+                      hover:text-red-500
+                    "
+                  >
+                    <Trash2 size={14} />
+                  </button>
+                </div>
               </div>
-
-              <button
-                type="button"
-                onClick={inserirTranscricao}
-                className="
-                  mt-2
-                  w-full
-                  py-2.5
-                  rounded-xl
-                  bg-[#43C3BC]/10
-                  border
-                  border-[#43C3BC]/20
-                  text-[#1C85A8]
-                  text-xs
-                  font-bold
-                  flex
-                  items-center
-                  justify-center
-                  gap-2
-                  hover:bg-[#43C3BC]/20
-                  transition
-                "
-              >
-                <Check size={15} />
-
-                Inserir nas observações
-              </button>
-            </div>
-          )}
-
-          {!transcrevendo &&
-            !transcricaoTemporaria &&
-            !transcricao && (
-              <p className="mt-3 text-[10px] text-[#1C85A8]/40 text-center">
-                Exemplo: "Foi identificada
-                ausência de aterramento na tomada
-                da bancada."
-              </p>
-            )}
+            ))}
+          </div>
         </div>
+      )}
 
-        {/* STATUS */}
-        {fotos.length === 0 &&
-          !audio &&
-          !transcricao && (
-            <div
-              className="
-                mt-3
-                rounded-xl
-                bg-[#9AD3E1]/10
-                py-3
-                text-center
-                text-xs
-                text-[#1C85A8]/50
-              "
-            >
-              Nenhuma evidência adicional
-              neste item.
-            </div>
-          )}
-      </div>
-    </section>
+    </div>
   );
 }
