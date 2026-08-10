@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { Check, AlertTriangle, X, Camera, ClipboardCheck, BarChart2, UserPlus, Users, Menu, FileText, Home, ChevronRight } from "lucide-react";
+import { Check, AlertTriangle, X, Camera, ClipboardCheck, BarChart2, UserPlus, Users, Menu, FileText, Home, ChevronRight, ChevronLeft } from "lucide-react";
 import { checklist } from "@/data/checklist";
 import { StatusAvaliacao, VistoriaState, Vistoriador } from "@/types/vistoria";
 import { supabase } from "./supabaseClient";
@@ -460,11 +460,11 @@ export default function PreImplantacaoApp() {
       {/* CABEÇALHO DA VISTORIA */}
       <header className="p-4 flex flex-col gap-3">
         <div className="flex justify-between items-center">
-          <button onClick={() => setIsMenuOpen(true)} className="p-2 -ml-2 text-gray-500 hover:text-gray-700">
-            <Menu size={24} />
+          <button onClick={() => setView("dashboard")} className="p-2 -ml-2 text-gray-500 hover:text-gray-700">
+            <ChevronLeft size={24} />
           </button>
           <h1 className="text-lg font-bold text-vistoria-dark">{vistoria.local}</h1>
-          <span className="text-sm font-bold text-vistoria-dark bg-vistoria-lightest/30 px-3 py-1 rounded-full">
+          <span className="text-sm font-bold text-vistoria-dark bg-vistoria-sky/20 px-3 py-1 rounded-full">
             {currentIndex + 1} / {checklist.length}
           </span>
         </div>
@@ -511,15 +511,24 @@ export default function PreImplantacaoApp() {
         </div>
       </section>
 
-      {tabBar}
+      {/* Botão flutuante para abrir o menu de tópicos */}
+      <button
+        onClick={() => setIsMenuOpen(true)}
+        className="fixed top-1/2 -translate-y-1/2 left-0 z-30 bg-white/80 backdrop-blur-sm pl-1 pr-2 py-3 rounded-r-lg shadow-lg border-y border-r border-gray-200 active:bg-gray-100 transition-colors"
+      >
+        <Menu size={22} className="text-vistoria-dark" />
+      </button>
 
       {/* MENU LATERAL DE NAVEGAÇÃO */}
       {isMenuOpen && (
         <div className="absolute inset-0 z-50 flex">
           <div className="absolute inset-0 bg-slate-900/40 backdrop-blur-sm" onClick={() => setIsMenuOpen(false)} />
           <nav className="w-4/5 max-w-sm h-full bg-gray-light flex flex-col animate-in slide-in-from-left-12 duration-300 shadow-2xl">
-            <header className="p-4 border-b border-gray-200">
-              <h2 className="text-lg font-bold text-vistoria-dark">Navegar por Tópicos</h2>
+            <header className="p-4 border-b border-gray-200 flex justify-between items-center">
+              <h2 className="text-lg font-bold text-vistoria-dark">Tópicos</h2>
+              <button onClick={() => setView('dashboard')} className="p-2 bg-gray-200 rounded-full active:bg-gray-300 transition-colors" title="Voltar ao Início">
+                <Home size={18} className="text-vistoria-dark" />
+              </button>
             </header>
             <ul className="flex-1 overflow-y-auto">
               {categorias.map(cat => (
