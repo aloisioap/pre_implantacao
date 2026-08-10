@@ -4,6 +4,7 @@ import { useState, useEffect } from "react";
 import { Check, AlertTriangle, X, Camera, ChevronLeft, ClipboardCheck, BarChart2, UserPlus, Users, Menu, FileText } from "lucide-react";
 import { checklist } from "@/data/checklist";
 import { Resposta, StatusAvaliacao, VistoriaState, Vistoriador } from "@/types/vistoria";
+import { supabase } from "@/lib/supabaseClient";
 
 type ViewState = "dashboard" | "vistoria" | "relatorio";
 type ModalState = "ressalva" | "nao_possui" | "novo_usuario" | null;
@@ -27,34 +28,58 @@ export default function PreImplantacaoApp() {
 
   // Autosave via LocalStorage
   useEffect(() => {
+    // Carrega o estado da vistoria (respostas) do localStorage
     const savedState = localStorage.getItem("@vistoria-state");
     if (savedState) setVistoria(JSON.parse(savedState));
 
-    const savedVistoriadores = localStorage.getItem("@vistoria-vistoriadores");
-    if (savedVistoriadores) setVistoriadores(JSON.parse(savedVistoriadores));
+    // Busca os vistoriadores do Supabase
+    const fetchVistoriadores = async () => {
+      const { data, error } = await supabase
+        .from('vistoriadores')
+        .select('nome, funcao');
+      
+      if (error) {
+        console.error("Erro ao buscar vistoriadores:", error);
+      } else {
+        setVistoriadores(data || []);
+      }
+    };
 
+    fetchVistoriadores();
     setIsLoaded(true);
   }, []);
 
   useEffect(() => {
     if (isLoaded) {
+      // Salva apenas o estado da vistoria, pois os vistoriadores estão no DB
       localStorage.setItem("@vistoria-state", JSON.stringify(vistoria));
-      localStorage.setItem("@vistoria-vistoriadores", JSON.stringify(vistoriadores));
     }
-  }, [vistoria, vistoriadores, isLoaded]);
+  }, [vistoria, isLoaded]);
 
   const handleSetVistoriador = (vistoriador: Vistoriador) => {
     setVistoria(prev => ({ ...prev, vistoriador }));
   };
 
-  const handleAddVistoriador = () => {
+  const handleAddVistoriador = async () => {
     if (novoVistoriador.nome.trim() && novoVistoriador.funcao.trim()) {
-      const novoVistoriadorCompleto = { ...novoVistoriador };
-      const novaLista = [...vistoriadores, novoVistoriadorCompleto];
-      setVistoriadores(novaLista);
-      setVistoria(prev => ({ ...prev, vistoriador: novoVistoriadorCompleto }));
-      setModalAberto(null);
-      setNovoVistoriador({ nome: "", funcao: "" });
+      const { data, error } = await supabase
+        .from('vistoriadores')
+        .insert([
+          { nome: novoVistoriador.nome, funcao: novoVistoriador.funcao },
+        ])
+        .select()
+        .single();
+
+      if (error) {
+        console.error("Erro ao adicionar vistoriador:", error);
+        // Adicionar feedback para o usuário aqui, se desejar
+      } else if (data) {
+        const novoVistoriadorCompleto = { nome: data.nome, funcao: data.funcao };
+        setVistoriadores(prev => [...prev, novoVistoriadorCompleto]);
+        setVistoria(prev => ({ ...prev, vistoriador: novoVistoriadorCompleto }));
+        setModalAberto(null);
+        setNovoVistoriador({ nome: "", funcao: "" });
+      }
     }
   };
   
@@ -221,6 +246,7 @@ export default function PreImplantacaoApp() {
                   conforme: 'border-acao-conforme',
                   ressalva: 'border-acao-ressalva',
                   nao_possui: 'border-acao-naopossui',
+                  nao_avaliado: 'border-gray-200', // Adicionado para cobrir todos os StatusAvaliacao
                 };
                 return (
                   <div key={resposta.requisitoId} className={`bg-white p-4 rounded-xl shadow-sm border ${statusColors[resposta.status] || 'border-gray-200'} border-l-4`}>
