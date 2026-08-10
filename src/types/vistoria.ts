@@ -1,6 +1,11 @@
 export type StatusAvaliacao = "nao_avaliado" | "conforme" | "ressalva" | "nao_possui";
 export type Criticidade = "critica" | "alta" | "media" | "baixa";
 
+export interface Vistoriador {
+  nome: string;
+  funcao: string;
+}
+
 export interface Requisito {
   id: string;
   codigo: string;
@@ -19,5 +24,7 @@ export interface Resposta {
 }
 
 export interface VistoriaState {
+  local: string;
+  vistoriador: Vistoriador | null;
   respostas: Record<string, Resposta>;
 }

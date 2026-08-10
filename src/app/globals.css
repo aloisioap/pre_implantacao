@@ -1,4 +1,5 @@
 @import "tailwindcss";
+@import "tailwindcss/utilities";
 
 @theme {
   --color-vistoria-lightest: #96d2d9;
@@ -27,5 +28,12 @@
     background-image: radial-gradient(var(--color-vistoria-lightest) 0.5px, transparent 0.5px), radial-gradient(var(--color-vistoria-lightest) 0.5px, var(--color-gray-light) 0.5px);
     background-size: 20px 20px;
     background-position: 0 0, 10px 10px;
+  }
+}
+
+@layer utilities {
+  @keyframes slide-in-from-left-12 {
+    from { transform: translateX(-3rem); }
+    to { transform: translateX(0); }
   }
 }
