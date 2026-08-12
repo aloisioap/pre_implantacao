@@ -23,6 +23,8 @@ import {
   Users,
   X,
   XCircle,
+  Edit3,
+  Trash2,
 } from "lucide-react";
 
 import { checklist } from "@/data/checklist";
@@ -38,8 +40,16 @@ type ViewState = "dashboard" | "vistoria" | "relatorio";
 type ModalState =
   | "ressalva"
   | "nao_possui"
+  | "gestao_vistoriadores"
   | "novo_usuario"
+  | "editar_vistoriador"
+  | "confirmar_exclusao"
   | null;
+
+type VistoriadorExtended = Vistoriador & {
+  created_at?: string;
+  updated_at?: string;
+};
 
 type FiltroRelatorio =
   | "todos"
@@ -88,9 +98,79 @@ export default function PreImplantacaoApp() {
   const [currentIndex, setCurrentIndex] = useState(0);
 
   const [isMenuOpen, setIsMenuOpen] = useState(false);
+  const [isDraggingSideMenu, setIsDraggingSideMenu] =
+    useState(false);
+  const [sideMenuDragProgress, setSideMenuDragProgress] =
+    useState(0);
+  const dragStartXRef = useRef<number | null>(null);
+  
+  // Sidebar stick-lock refs/state
+  const sidebarContainerRef = useRef<HTMLElement | null>(null);
+  const sidebarInnerRef = useRef<HTMLDivElement | null>(null);
+  const rafRef = useRef<number | null>(null);
 
   const [isSidebarCollapsed, setIsSidebarCollapsed] =
     useState(false);
+  
+  const updateSidebarPosition = () => {
+    if (!sidebarContainerRef.current || !sidebarInnerRef.current) return;
+
+    // Use CSS sticky behaviour where possible. For small screens reset to static.
+    const headerEl = document.querySelector("header");
+    const headerHeight = headerEl ? (headerEl as HTMLElement).offsetHeight : 0;
+
+    if (window.innerWidth < 1024) {
+      sidebarInnerRef.current.style.position = "static";
+      sidebarInnerRef.current.style.top = "";
+      sidebarInnerRef.current.style.transform = "none";
+      return;
+    }
+
+    // Make the inner wrapper sticky so it follows the viewport naturally and
+    // stops when the container ends. This avoids math drift and visual gaps.
+    try {
+      const container = sidebarContainerRef.current.getBoundingClientRect();
+      const inner = sidebarInnerRef.current.getBoundingClientRect();
+      const topOffset = headerHeight + 12; // small gap from top when sticking
+
+      // Apply sticky positioning and top offset.
+      sidebarInnerRef.current.style.position = "sticky";
+      sidebarInnerRef.current.style.top = `${topOffset}px`;
+      sidebarInnerRef.current.style.transform = "none";
+
+      // Debug information — helpful when testing the clamp behaviour.
+      // Remove or comment out in production once verified.
+      // eslint-disable-next-line no-console
+      console.log("[sidebar] container:", container, "inner:", inner, "topOffset:", topOffset);
+    } catch (e) {
+      // eslint-disable-next-line no-console
+      console.warn("[sidebar] failed to compute sticky position", e);
+    }
+  };
+
+  useEffect(() => {
+    const onScroll = () => {
+      if (rafRef.current) cancelAnimationFrame(rafRef.current);
+      rafRef.current = requestAnimationFrame(updateSidebarPosition);
+    };
+
+    const onResize = () => {
+      if (rafRef.current) cancelAnimationFrame(rafRef.current);
+      rafRef.current = requestAnimationFrame(updateSidebarPosition);
+    };
+
+    window.addEventListener('scroll', onScroll, { passive: true });
+    window.addEventListener('resize', onResize);
+
+    // initial
+    updateSidebarPosition();
+
+    return () => {
+      window.removeEventListener('scroll', onScroll);
+      window.removeEventListener('resize', onResize);
+      if (rafRef.current) cancelAnimationFrame(rafRef.current);
+    };
+  }, []);
 
   /* -------------------------------------------------------
      VISTORIA
@@ -109,12 +189,81 @@ export default function PreImplantacaoApp() {
     respostas: {},
   });
 
+  const getVistoriaStorageKey = (vistoriadorId: string) =>
+    `@active-vistoria-id-${vistoriadorId}`;
+
+  const loadVistoriaById = async (vistoriaId: string) => {
+    const {
+      data: vistoriaData,
+      error: vistoriaError,
+    } = await supabase
+      .from("vistorias")
+      .select("*, vistoriador:vistoriadores(id, nome, funcao)")
+      .eq("id", vistoriaId)
+      .single();
+
+    if (vistoriaError || !vistoriaData) {
+      return null;
+    }
+
+    return vistoriaData as {
+      id: string;
+      local: string;
+      respostas: Respostas;
+      vistoriador: Vistoriador | null;
+    };
+  };
+
+  const activateVistoriaForVistoriador = async (
+    vistoriador: Vistoriador
+  ) => {
+    const storageKey = getVistoriaStorageKey(
+      vistoriador.id
+    );
+
+    const storedId = localStorage.getItem(
+      storageKey
+    );
+
+    if (!storedId) {
+      setActiveVistoriaId(null);
+      setVistoria((prev) => ({
+        ...prev,
+        vistoriador,
+        respostas: {},
+      }));
+      return;
+    }
+
+    const data = await loadVistoriaById(
+      storedId
+    );
+
+    if (!data) {
+      localStorage.removeItem(storageKey);
+      setActiveVistoriaId(null);
+      setVistoria((prev) => ({
+        ...prev,
+        vistoriador,
+        respostas: {},
+      }));
+      return;
+    }
+
+    setActiveVistoriaId(data.id);
+    setVistoria({
+      local: data.local || vistoria.local,
+      respostas: data.respostas || {},
+      vistoriador: data.vistoriador || vistoriador,
+    });
+  };
+
   /* -------------------------------------------------------
      VISTORIADORES
   ------------------------------------------------------- */
 
   const [vistoriadores, setVistoriadores] = useState<
-    Vistoriador[]
+    VistoriadorExtended[]
   >([]);
 
   /* -------------------------------------------------------
@@ -123,6 +272,12 @@ export default function PreImplantacaoApp() {
 
   const [modalAberto, setModalAberto] =
     useState<ModalState>(null);
+
+  const [selectedVistoriador, setSelectedVistoriador] = useState<VistoriadorExtended | null>(null);
+  const [vistoriadorModalFields, setVistoriadorModalFields] = useState({
+    nome: "",
+    funcao: "",
+  });
 
   const [obsTemp, setObsTemp] = useState("");
 
@@ -157,6 +312,9 @@ export default function PreImplantacaoApp() {
   const [isLoaded, setIsLoaded] = useState(false);
 
   const [isSaving, setIsSaving] = useState(false);
+  const [deletingVistoriadorId, setDeletingVistoriadorId] = useState<string | null>(null);
+  const [vistoriadorSearch, setVistoriadorSearch] = useState("");
+  const [snackbar, setSnackbar] = useState<string | null>(null);
 
   /* =======================================================
      CARREGAMENTO INICIAL
@@ -174,7 +332,7 @@ export default function PreImplantacaoApp() {
           error: vistoriadoresError,
         } = await supabase
           .from("vistoriadores")
-          .select("id, nome, funcao")
+.select("id, nome, funcao, created_at, updated_at")
           .order("nome");
 
         if (vistoriadoresError) {
@@ -184,7 +342,7 @@ export default function PreImplantacaoApp() {
           );
         } else {
           setVistoriadores(
-            (vistoriadoresData || []) as Vistoriador[]
+            (vistoriadoresData || []) as VistoriadorExtended[]
           );
         }
 
@@ -266,19 +424,38 @@ export default function PreImplantacaoApp() {
       return;
     }
 
-    const { error } = await supabase
-      .from("vistorias")
-      .update({
-        ...dbUpdates,
-        updated_at: new Date().toISOString(),
-      })
-      .eq("id", activeVistoriaId);
+    try {
+      // If respostas is being updated, merge with server-side to avoid clobbering concurrent changes
+      if (dbUpdates.respostas) {
+        const { data: current, error: fetchErr } = await supabase
+          .from("vistorias")
+          .select("respostas")
+          .eq("id", activeVistoriaId)
+          .single();
 
-    if (error) {
-      console.error(
-        "Erro ao salvar vistoria:",
-        error
-      );
+        if (fetchErr) {
+          console.warn("Não foi possível buscar respostas atuais para merge:", fetchErr);
+        } else if (current && current.respostas) {
+          dbUpdates.respostas = {
+            ...(current.respostas || {}),
+            ...(dbUpdates.respostas as Respostas),
+          };
+        }
+      }
+
+      const { error } = await supabase
+        .from("vistorias")
+        .update({
+          ...dbUpdates,
+          updated_at: new Date().toISOString(),
+        })
+        .eq("id", activeVistoriaId);
+
+      if (error) {
+        console.error("Erro ao salvar vistoria:", error);
+      }
+    } catch (err) {
+      console.error("Erro inesperado ao salvar vistoria:", err);
     }
   };
 
@@ -305,12 +482,68 @@ export default function PreImplantacaoApp() {
      SELECIONAR VISTORIADOR
   ======================================================= */
 
-  const handleSetVistoriador = (
+  const handleSetVistoriador = async (
     vistoriador: Vistoriador
   ) => {
     handleSetVistoria({
       vistoriador,
     });
+
+    await activateVistoriaForVistoriador(
+      vistoriador
+    );
+  };
+
+  const showSnackbar = (message: string) => {
+    setSnackbar(message);
+    window.setTimeout(() => setSnackbar(null), 2800);
+  };
+
+  const handleDeleteVistoriador = async (
+    id: string
+  ) => {
+    if (!id) return;
+
+    setDeletingVistoriadorId(id);
+
+    try {
+      // Remove from database (hard delete). FK on vistorias uses ON DELETE SET NULL so data remains.
+      const { error: deleteErr } = await supabase
+        .from("vistoriadores")
+        .delete()
+        .eq("id", id);
+
+      if (deleteErr) {
+        throw deleteErr;
+      }
+
+      // Remove locally after DB delete
+      setVistoriadores((prev) => prev.filter((item) => item.id !== id));
+
+      if (vistoria.vistoriador?.id === id) {
+        setActiveVistoriaId(null);
+        setVistoria((prev) => ({
+          ...prev,
+          vistoriador: null,
+          respostas: {},
+        }));
+        localStorage.removeItem(
+          getVistoriaStorageKey(id)
+        );
+      }
+
+      showSnackbar("Vistoriador removido do banco e da interface.");
+    } catch (error) {
+      console.error(
+        "Erro ao eliminar vistoriador localmente:",
+        error
+      );
+      showSnackbar(
+        "Não foi possível remover o vistoriador. Verifique o console."
+      );
+    } finally {
+      setDeletingVistoriadorId(null);
+    }
   };
 
   /* =======================================================
@@ -336,7 +569,7 @@ export default function PreImplantacaoApp() {
             funcao,
           },
         ])
-        .select("id, nome, funcao")
+        .select("id, nome, funcao, created_at, updated_at")
         .single();
 
       if (error) {
@@ -356,7 +589,7 @@ export default function PreImplantacaoApp() {
         return;
       }
 
-      const novo = data as Vistoriador;
+      const novo = data as VistoriadorExtended;
 
       /* adiciona à lista */
       setVistoriadores((prev) =>
@@ -373,6 +606,7 @@ export default function PreImplantacaoApp() {
         nome: "",
         funcao: "",
       });
+      setVistoriadorModalFields({ nome: "", funcao: "" });
 
       /* fecha modal */
       setModalAberto(null);
@@ -388,6 +622,82 @@ export default function PreImplantacaoApp() {
     } finally {
       setIsSaving(false);
     }
+  };
+
+  const closeVistoriadorModal = () => {
+    setSelectedVistoriador(null);
+    setVistoriadorModalFields({ nome: "", funcao: "" });
+    setModalAberto(null);
+  };
+
+  const openNovoVistoriadorModal = () => {
+    setSelectedVistoriador(null);
+    setVistoriadorModalFields({ nome: "", funcao: "" });
+    setModalAberto("novo_usuario");
+  };
+
+  const openEditarVistoriadorModal = (vistoriador: VistoriadorExtended) => {
+    setSelectedVistoriador(vistoriador);
+    setVistoriadorModalFields({ nome: vistoriador.nome, funcao: vistoriador.funcao });
+    setModalAberto("editar_vistoriador");
+  };
+
+  const handleUpdateVistoriador = async () => {
+    if (!selectedVistoriador) return;
+
+    const nome = vistoriadorModalFields.nome.trim();
+    const funcao = vistoriadorModalFields.funcao.trim();
+
+    if (!nome || !funcao) {
+      return;
+    }
+
+    setIsSaving(true);
+
+    try {
+      const { data, error } = await supabase
+        .from("vistoriadores")
+        .update({ nome, funcao, updated_at: new Date().toISOString() })
+        .eq("id", selectedVistoriador.id)
+        .select("id, nome, funcao, created_at, updated_at")
+        .single();
+
+      if (error) {
+        throw error;
+      }
+
+      if (!data) {
+        throw new Error("Nenhum dado retornado");
+      }
+
+      const atualizado = data as VistoriadorExtended;
+
+      setVistoriadores((prev) =>
+        prev.map((item) =>
+          item.id === atualizado.id ? atualizado : item
+        )
+      );
+
+      if (vistoria.vistoriador?.id === atualizado.id) {
+        setVistoria((prev) => ({
+          ...prev,
+          vistoriador: atualizado,
+        }));
+      }
+
+      showSnackbar("Vistoriador atualizado com sucesso.");
+      closeVistoriadorModal();
+    } catch (error) {
+      console.error("Erro ao atualizar vistoriador:", error);
+      showSnackbar("Falha ao atualizar o vistoriador.");
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  const openConfirmDeleteModal = (vistoriador: VistoriadorExtended) => {
+    setSelectedVistoriador(vistoriador);
+    setModalAberto("confirmar_exclusao");
   };
 
   /* =======================================================
@@ -574,6 +884,15 @@ export default function PreImplantacaoApp() {
           "@active-vistoria-id",
           data.id
         );
+
+        if (vistoria.vistoriador?.id) {
+          localStorage.setItem(
+            getVistoriaStorageKey(
+              vistoria.vistoriador.id
+            ),
+            data.id
+          );
+        }
       } finally {
         setIsSaving(false);
       }
@@ -629,6 +948,11 @@ export default function PreImplantacaoApp() {
             100
         )
       : 0;
+
+  const vistoriaStatus =
+    activeVistoriaId && vistoria.vistoriador
+      ? "Em andamento"
+      : "Pendente";
 
   const contagem = useMemo(() => {
     const respostas = Object.values(
@@ -868,6 +1192,7 @@ export default function PreImplantacaoApp() {
 
   const topicListNav = (
     <aside
+      ref={sidebarContainerRef}
       className={`
         h-full
         bg-white/65
@@ -885,13 +1210,13 @@ export default function PreImplantacaoApp() {
         }
       `}
     >
+      <div ref={sidebarInnerRef} className="h-full transition-transform duration-300 ease-out">
       {/* Cabeçalho */}
 
       <div
         className="
           flex
           items-center
-          justify-between
           gap-3
           p-4
           border-b
@@ -914,42 +1239,6 @@ export default function PreImplantacaoApp() {
             </p>
           </div>
         )}
-
-        <button
-          onClick={() =>
-            setIsSidebarCollapsed(
-              (prev) => !prev
-            )
-          }
-          className="
-            w-9
-            h-9
-            rounded-xl
-            flex
-            items-center
-            justify-center
-            bg-white/80
-            border
-            border-white
-            shadow-sm
-            hover:scale-105
-            transition-transform
-          "
-          style={{
-            color: COLORS.dark,
-          }}
-          title={
-            isSidebarCollapsed
-              ? "Expandir menu"
-              : "Recolher menu"
-          }
-        >
-          {isSidebarCollapsed ? (
-            <ChevronRight size={18} />
-          ) : (
-            <ChevronLeft size={18} />
-          )}
-        </button>
       </div>
 
       {/* Lista */}
@@ -1156,6 +1445,7 @@ export default function PreImplantacaoApp() {
             );
           }
         )}
+      </div>
       </div>
     </aside>
   );
@@ -1673,11 +1963,7 @@ export default function PreImplantacaoApp() {
                     </label>
 
                     <button
-                      onClick={() =>
-                        setModalAberto(
-                          "novo_usuario"
-                        )
-                      }
+                      onClick={openNovoVistoriadorModal}
                       className="
                         text-[10px]
                         font-black
@@ -1731,24 +2017,17 @@ export default function PreImplantacaoApp() {
                           ?.id ?? ""
                       }
                       onChange={(event) => {
-                        const id =
-                          Number(
-                            event.target
-                              .value
-                          );
+                        const id = event.target.value;
 
                         const selecionado =
                           vistoriadores.find(
-                            (v) =>
-                              Number(
-                                v.id
-                              ) === id
+                            (v) => v.id === id
                           );
 
                         if (
                           selecionado
                         ) {
-                          handleSetVistoriador(
+                          void handleSetVistoriador(
                             selecionado
                           );
                         }
@@ -1772,9 +2051,10 @@ export default function PreImplantacaoApp() {
                     </select>
 
                     <button
+                      type="button"
                       onClick={() =>
                         setModalAberto(
-                          "novo_usuario"
+                          "gestao_vistoriadores"
                         )
                       }
                       className="
@@ -1794,13 +2074,63 @@ export default function PreImplantacaoApp() {
                         background:
                           `linear-gradient(135deg, ${COLORS.cerulean}, ${COLORS.petrol})`,
                       }}
-                      title="Novo vistoriador"
+                      title="Gerenciar vistoriadores"
                     >
                       <UserPlus
                         size={19}
                       />
                     </button>
                   </div>
+
+                  {vistoriadores.length > 0 && (
+                    <div className="mt-4 rounded-3xl border border-slate-200 bg-slate-50/80 p-3 space-y-2">
+                      <div className="flex items-center justify-between gap-2">
+                        <p className="text-[10px] font-black uppercase tracking-[0.2em] text-slate-500">
+                          Vistoriadores cadastrados
+                        </p>
+                        <span className="text-[10px] text-slate-400">
+                          {vistoriadores.length}
+                        </span>
+                      </div>
+
+                      <div className="space-y-2">
+                        {vistoriadores.map((v) => (
+                          <div
+                            key={v.id}
+                            className="flex items-center justify-between gap-2 rounded-2xl border border-white bg-white/80 px-3 py-2"
+                          >
+                            <button
+                              type="button"
+                              onClick={() => void handleSetVistoriador(v)}
+                              className="text-left min-w-0 flex-1 text-[12px] font-semibold text-slate-700 truncate"
+                            >
+                              {v.nome} ({v.funcao})
+                            </button>
+
+                            <div className="flex items-center gap-2">
+                              <button
+                                type="button"
+                                onClick={() => openEditarVistoriadorModal(v)}
+                                title="Editar vistoriador"
+                                className="w-8 h-8 rounded-md flex items-center justify-center text-slate-600 hover:bg-slate-100 transition"
+                              >
+                                <Edit3 size={14} />
+                              </button>
+
+                              <button
+                                type="button"
+                                onClick={() => openConfirmDeleteModal(v)}
+                                title="Remover vistoriador"
+                                className="w-8 h-8 rounded-md flex items-center justify-center text-rose-600 hover:bg-rose-50 transition"
+                              >
+                                <Trash2 size={14} />
+                              </button>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
 
                   {!vistoria.vistoriador && (
                     <p className="text-[11px] text-amber-700 mt-2">
@@ -1860,7 +2190,7 @@ export default function PreImplantacaoApp() {
                       flex
                       flex-col
                       justify-between
-                      min-h-[130px]
+                      min-h-[92px]
                     "
                   >
                     <div
@@ -2121,233 +2451,226 @@ export default function PreImplantacaoApp() {
 
         {/* NOVO VISTORIADOR */}
 
-        {modalAberto ===
-          "novo_usuario" && (
-          <div className="fixed inset-0 z-[100] flex items-center justify-center p-4">
-            <div
-              className="
-                absolute
-                inset-0
-                bg-slate-900/20
-                backdrop-blur-md
-              "
-              onClick={() =>
-                setModalAberto(null)
-              }
-            />
+        {modalAberto === "gestao_vistoriadores" && (
+        <div className="fixed inset-0 z-[100] flex items-center justify-center p-4">
+          <div
+            className="absolute inset-0 bg-slate-900/20 backdrop-blur-md"
+            onClick={() => setModalAberto(null)}
+          />
 
-            <div
-              className="
-                relative
-                z-10
-                w-full
-                max-w-md
-                rounded-[2rem]
-                p-6
-                bg-white/80
-                backdrop-blur-2xl
-                border
-                border-white
-                shadow-[0_30px_80px_rgba(28,133,168,0.25)]
-              "
-            >
-              <div className="flex items-center justify-between mb-6">
-                <div className="flex items-center gap-3">
-                  <div
-                    className="
-                      w-11
-                      h-11
-                      rounded-2xl
-                      flex
-                      items-center
-                      justify-center
-                    "
-                    style={{
-                      background:
-                        "rgba(84,180,231,0.16)",
-                      color:
-                        COLORS.dark,
-                    }}
-                  >
-                    <UserPlus
-                      size={21}
-                    />
-                  </div>
-
-                  <div>
-                    <p
-                      className="text-[10px] font-black tracking-widest"
-                      style={{
-                        color:
-                          COLORS.dark,
-                      }}
-                    >
-                      CADASTRO
-                    </p>
-
-                    <h3 className="text-lg font-black text-slate-700">
-                      Novo Vistoriador
-                    </h3>
-                  </div>
-                </div>
-
-                <button
-                  onClick={() =>
-                    setModalAberto(
-                      null
-                    )
-                  }
-                  className="
-                    w-9
-                    h-9
-                    rounded-full
-                    bg-white
-                    border
-                    border-slate-100
-                    flex
-                    items-center
-                    justify-center
-                    text-slate-400
-                    hover:text-slate-700
-                  "
-                >
-                  <X size={18} />
-                </button>
-              </div>
-
-              <div className="space-y-4">
-                <div>
-                  <label className="text-xs font-bold text-slate-500 mb-1.5 block">
-                    Nome completo
-                  </label>
-
-                  <input
-                    autoFocus
-                    value={
-                      novoVistoriador.nome
-                    }
-                    onChange={(event) =>
-                      setNovoVistoriador(
-                        (prev) => ({
-                          ...prev,
-                          nome:
-                            event.target
-                              .value,
-                        })
-                      )
-                    }
-                    placeholder="Ex.: João da Silva"
-                    className="
-                      w-full
-                      px-4
-                      py-3.5
-                      rounded-xl
-                      bg-white/70
-                      border
-                      border-slate-200
-                      outline-none
-                      text-slate-700
-                      focus:ring-2
-                    "
-                    style={{
-                      outlineColor:
-                        COLORS.sky,
-                    }}
-                  />
-                </div>
-
-                <div>
-                  <label className="text-xs font-bold text-slate-500 mb-1.5 block">
-                    Função
-                  </label>
-
-                  <input
-                    value={
-                      novoVistoriador.funcao
-                    }
-                    onChange={(event) =>
-                      setNovoVistoriador(
-                        (prev) => ({
-                          ...prev,
-                          funcao:
-                            event.target
-                              .value,
-                        })
-                      )
-                    }
-                    placeholder="Ex.: Engenheiro Clínico"
-                    className="
-                      w-full
-                      px-4
-                      py-3.5
-                      rounded-xl
-                      bg-white/70
-                      border
-                      border-slate-200
-                      outline-none
-                      text-slate-700
-                    "
-                  />
-                </div>
-              </div>
-
-              <div className="flex gap-3 mt-6">
-                <button
-                  onClick={() =>
-                    setModalAberto(
-                      null
-                    )
-                  }
-                  className="
-                    flex-1
-                    py-3.5
-                    rounded-xl
-                    font-bold
-                    text-slate-500
-                    bg-slate-100
-                    hover:bg-slate-200
-                  "
-                >
-                  CANCELAR
-                </button>
-
-                <button
-                  onClick={() =>
-                    void handleAddVistoriador()
-                  }
-                  disabled={
-                    !novoVistoriador.nome.trim() ||
-                    !novoVistoriador.funcao.trim() ||
-                    isSaving
-                  }
-                  className="
-                    flex-[1.7]
-                    py-3.5
-                    rounded-xl
-                    font-black
-                    text-white
-                    disabled:opacity-40
-                    transition-all
-                    shadow-lg
-                  "
+          <div className="relative z-10 w-full max-w-3xl rounded-[2rem] p-6 bg-white/95 backdrop-blur-2xl border border-white shadow-[0_30px_80px_rgba(28,133,168,0.25)]">
+            <div className="flex flex-col gap-5 lg:flex-row lg:items-center lg:justify-between mb-6">
+              <div className="flex items-center gap-3">
+                <div
+                  className="w-14 h-14 rounded-3xl flex items-center justify-center"
                   style={{
-                    background: `
-                      linear-gradient(
-                        135deg,
-                        ${COLORS.cerulean},
-                        ${COLORS.petrol}
-                      )
-                    `,
+                    background: "rgba(84,180,231,0.16)",
+                    color: COLORS.dark,
                   }}
                 >
-                  {isSaving
-                    ? "SALVANDO..."
-                    : "SALVAR E USAR"}
-                </button>
+                  <Users size={24} />
+                </div>
+
+                <div>
+                  <p className="text-[10px] font-black tracking-widest uppercase" style={{ color: COLORS.dark }}>
+                    GESTÃO DE VISTORIADORES
+                  </p>
+                  <h3 className="text-xl font-black text-slate-700">Cadastre, busque e exclua usuários</h3>
+                </div>
               </div>
+
+              <button
+                type="button"
+                onClick={() => setModalAberto(null)}
+                className="w-11 h-11 rounded-full bg-white border border-slate-200 flex items-center justify-center text-slate-400 hover:text-slate-700"
+              >
+                <X size={18} />
+              </button>
+            </div>
+
+            <div className="grid grid-cols-1 xl:grid-cols-[1.3fr_0.9fr] gap-5">
+              <div className="space-y-4">
+                <div className="space-y-2">
+                  <div className="flex items-center justify-between gap-3">
+                    <label className="text-[11px] font-black uppercase tracking-[0.22em] text-slate-500">
+                      Buscar vistoriadores
+                    </label>
+                    <span className="text-[11px] font-black text-slate-400">{vistoriadores.length} cadastrados</span>
+                  </div>
+
+                  <input
+                    value={vistoriadorSearch}
+                    onChange={(event) => setVistoriadorSearch(event.target.value)}
+                    placeholder="Nome ou função"
+                    className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-700 outline-none focus:border-slate-300"
+                  />
+                </div>
+
+                <div className="rounded-[2rem] border border-slate-200 bg-slate-50 p-4 space-y-3 max-h-[52vh] overflow-y-auto">
+                  {vistoriadores.filter((v) =>
+                    `${v.nome} ${v.funcao}`.toLowerCase().includes(vistoriadorSearch.toLowerCase())
+                  ).length === 0 ? (
+                    <p className="text-sm text-slate-500">Nenhum vistoriador encontrado.</p>
+                  ) : (
+                    vistoriadores
+                      .filter((v) =>
+                        `${v.nome} ${v.funcao}`.toLowerCase().includes(vistoriadorSearch.toLowerCase())
+                      )
+                      .map((v) => (
+                        <div key={v.id} className="rounded-3xl border border-slate-200 bg-white shadow-sm p-4">
+                          <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+                            <div className="min-w-0">
+                              <p className="text-sm font-black text-slate-700 truncate">{v.nome}</p>
+                              <p className="text-[11px] text-slate-500 mt-1 truncate">{v.funcao}</p>
+                            </div>
+                            <div className="flex items-center gap-2">
+                              <button
+                                type="button"
+                                onClick={() => openEditarVistoriadorModal(v)}
+                                className="rounded-full px-3 py-2 text-[10px] font-black text-slate-700 bg-slate-100 border border-slate-200 hover:bg-slate-200 transition"
+                              >
+                                Editar
+                              </button>
+                            </div>
+                          </div>
+
+                          <div className="mt-3 flex flex-wrap gap-2 text-[10px] text-slate-400">
+                            {v.created_at && <span>Criado em {new Date(v.created_at).toLocaleDateString("pt-BR")}</span>}
+                            {v.updated_at && <span>Atualizado em {new Date(v.updated_at).toLocaleDateString("pt-BR")}</span>}
+                          </div>
+                        </div>
+                      ))
+                  )}
+                </div>
+              </div>
+
             </div>
           </div>
-        )}
+        </div>
+      )}
+
+      {modalAberto === "novo_usuario" && (
+        <div className="fixed inset-0 z-[110] flex items-center justify-center p-4">
+          <div className="absolute inset-0 bg-slate-900/30 backdrop-blur-sm" onClick={closeVistoriadorModal} />
+          <div className="relative z-10 w-full max-w-xl rounded-[2rem] bg-white/95 p-6 border border-white shadow-[0_30px_80px_rgba(28,133,168,0.25)]">
+            <div className="flex items-center justify-between mb-5">
+              <div>
+                <p className="text-[10px] font-black uppercase tracking-[0.22em] text-slate-500">Novo vistoriador</p>
+                <h3 className="text-xl font-black text-slate-700 mt-1">Cadastrar novo auditor</h3>
+              </div>
+              <button type="button" onClick={closeVistoriadorModal} className="w-11 h-11 rounded-full bg-slate-100 flex items-center justify-center text-slate-600 hover:text-slate-900 transition">
+                <X size={18} />
+              </button>
+            </div>
+            <div className="space-y-4">
+              <div>
+                <label className="text-[11px] font-black text-slate-700 mb-1.5 block">Nome completo</label>
+                <input
+                  value={vistoriadorModalFields.nome}
+                  onChange={(event) => setVistoriadorModalFields((prev) => ({ ...prev, nome: event.target.value }))}
+                  placeholder="Ex.: João da Silva"
+                  className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-700 outline-none focus:border-slate-300"
+                />
+              </div>
+              <div>
+                <label className="text-[11px] font-black text-slate-700 mb-1.5 block">Função</label>
+                <input
+                  value={vistoriadorModalFields.funcao}
+                  onChange={(event) => setVistoriadorModalFields((prev) => ({ ...prev, funcao: event.target.value }))}
+                  placeholder="Ex.: Engenheiro Clínico"
+                  className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-700 outline-none focus:border-slate-300"
+                />
+              </div>
+              <button
+                type="button"
+                onClick={() => void handleAddVistoriador()}
+                disabled={!vistoriadorModalFields.nome.trim() || !vistoriadorModalFields.funcao.trim() || isSaving}
+                className="w-full rounded-2xl py-3 text-sm font-black text-white transition disabled:opacity-50"
+                style={{ background: `linear-gradient(135deg, ${COLORS.cerulean}, ${COLORS.petrol})` }}
+              >
+                {isSaving ? "SALVANDO..." : "ADICIONAR VISTORIADOR"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {modalAberto === "editar_vistoriador" && selectedVistoriador && (
+        <div className="fixed inset-0 z-[110] flex items-center justify-center p-4">
+          <div className="absolute inset-0 bg-slate-900/30 backdrop-blur-sm" onClick={closeVistoriadorModal} />
+          <div className="relative z-10 w-full max-w-xl rounded-[2rem] bg-white/95 p-6 border border-white shadow-[0_30px_80px_rgba(28,133,168,0.25)]">
+            <div className="flex items-center justify-between mb-5">
+              <div>
+                <p className="text-[10px] font-black uppercase tracking-[0.22em] text-slate-500">Editar vistoriador</p>
+                <h3 className="text-xl font-black text-slate-700 mt-1">{selectedVistoriador.nome}</h3>
+              </div>
+              <button type="button" onClick={closeVistoriadorModal} className="w-11 h-11 rounded-full bg-slate-100 flex items-center justify-center text-slate-600 hover:text-slate-900 transition">
+                <X size={18} />
+              </button>
+            </div>
+            <div className="space-y-4">
+              <div>
+                <label className="text-[11px] font-black text-slate-700 mb-1.5 block">Nome completo</label>
+                <input
+                  value={vistoriadorModalFields.nome}
+                  onChange={(event) => setVistoriadorModalFields((prev) => ({ ...prev, nome: event.target.value }))}
+                  className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-700 outline-none focus:border-slate-300"
+                />
+              </div>
+              <div>
+                <label className="text-[11px] font-black text-slate-700 mb-1.5 block">Função</label>
+                <input
+                  value={vistoriadorModalFields.funcao}
+                  onChange={(event) => setVistoriadorModalFields((prev) => ({ ...prev, funcao: event.target.value }))}
+                  className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-700 outline-none focus:border-slate-300"
+                />
+              </div>
+              <button
+                type="button"
+                onClick={() => void handleUpdateVistoriador()}
+                disabled={!vistoriadorModalFields.nome.trim() || !vistoriadorModalFields.funcao.trim() || isSaving}
+                className="w-full rounded-2xl py-3 text-sm font-black text-white transition disabled:opacity-50"
+                style={{ background: `linear-gradient(135deg, ${COLORS.cerulean}, ${COLORS.petrol})` }}
+              >
+                {isSaving ? "SALVANDO..." : "ATUALIZAR VISTORIADOR"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {modalAberto === "confirmar_exclusao" && selectedVistoriador && (
+        <div className="fixed inset-0 z-[110] flex items-center justify-center p-4">
+          <div className="absolute inset-0 bg-slate-900/30 backdrop-blur-sm" onClick={closeVistoriadorModal} />
+          <div className="relative z-10 w-full max-w-md rounded-[2rem] bg-white/95 p-6 border border-white shadow-[0_30px_80px_rgba(28,133,168,0.25)]">
+            <div className="flex items-center justify-between mb-5">
+              <div>
+                <p className="text-[10px] font-black uppercase tracking-[0.22em] text-slate-500">Confirmar exclusão</p>
+                <h3 className="text-xl font-black text-slate-700 mt-1">Remover {selectedVistoriador.nome}?</h3>
+              </div>
+              <button type="button" onClick={closeVistoriadorModal} className="w-11 h-11 rounded-full bg-slate-100 flex items-center justify-center text-slate-600 hover:text-slate-900 transition">
+                <X size={18} />
+              </button>
+            </div>
+            <p className="text-sm text-slate-600 mb-5">A exclusão remove o vistoriador somente da interface atual; os dados permanecem no banco.</p>
+            <div className="flex gap-3">
+              <button type="button" onClick={closeVistoriadorModal} className="flex-1 rounded-2xl border border-slate-200 py-3 text-sm font-black text-slate-700 hover:bg-slate-50 transition">Cancelar</button>
+              <button
+                type="button"
+                onClick={() => {
+                  if (selectedVistoriador) {
+                    void handleDeleteVistoriador(selectedVistoriador.id);
+                  }
+                  closeVistoriadorModal();
+                }}
+                className="flex-1 rounded-2xl bg-rose-600 py-3 text-sm font-black text-white hover:bg-rose-700 transition"
+              >
+                Confirmar exclusão
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
       </main>
     );
   }
@@ -2814,7 +3137,7 @@ export default function PreImplantacaoApp() {
     >
       <div className="min-h-screen flex">
         <div className="hidden lg:block shrink-0">
-          {topicListNav}
+          {!isSidebarCollapsed && topicListNav}
         </div>
 
         <div className="flex-1 min-w-0 flex flex-col">
@@ -2862,6 +3185,34 @@ export default function PreImplantacaoApp() {
           </header>
 
           <section className="flex-1 px-3 sm:px-5 lg:px-8 py-5 lg:py-7 pb-28">
+            <div className="sticky top-20 z-20 mb-5 rounded-[2rem] border border-white/80 bg-white/90 backdrop-blur-2xl p-5 shadow-[0_16px_50px_rgba(28,133,168,0.10)]">
+              <div className="grid gap-4 md:grid-cols-3">
+                <div className="rounded-2xl bg-slate-50 p-4">
+                  <p className="text-[10px] font-black uppercase tracking-[0.2em] text-slate-400">
+                    Auditor ativo
+                  </p>
+                  <p className="mt-2 text-sm font-black text-slate-700 truncate">
+                    {vistoria.vistoriador?.nome || "Nenhum auditor selecionado"}
+                  </p>
+                </div>
+                <div className="rounded-2xl bg-slate-50 p-4">
+                  <p className="text-[10px] font-black uppercase tracking-[0.2em] text-slate-400">
+                    Status da vistoria
+                  </p>
+                  <span className="mt-2 inline-flex items-center rounded-full bg-slate-900/5 px-3 py-1 text-[11px] font-black text-slate-700">
+                    {vistoriaStatus}
+                  </span>
+                </div>
+                <div className="rounded-2xl bg-slate-50 p-4">
+                  <p className="text-[10px] font-black uppercase tracking-[0.2em] text-slate-400">
+                    Itens concluídos
+                  </p>
+                  <p className="mt-2 text-sm font-black text-slate-700">
+                    {totalAvaliados} / {checklist.length}
+                  </p>
+                </div>
+              </div>
+            </div>
             <div className="max-w-5xl mx-auto space-y-5">
               <div className="rounded-[2rem] p-5 lg:p-6 bg-white/48 backdrop-blur-2xl border border-white/80 shadow-[0_20px_70px_rgba(28,133,168,0.10)]">
                 <div className="flex flex-col lg:flex-row lg:items-end lg:justify-between gap-4">
@@ -3027,6 +3378,55 @@ export default function PreImplantacaoApp() {
           </button>
         </div>
       </div>
+
+      <button
+        type="button"
+        onPointerDown={(event) => {
+          event.currentTarget.setPointerCapture(event.pointerId);
+          dragStartXRef.current = event.clientX;
+          setIsDraggingSideMenu(true);
+        }}
+        onPointerMove={(event) => {
+          if (!isDraggingSideMenu || dragStartXRef.current === null) {
+            return;
+          }
+
+          const deltaX = event.clientX - dragStartXRef.current;
+          const clamped = Math.max(0, Math.min(40, deltaX));
+
+          setSideMenuDragProgress(clamped);
+
+          if (deltaX > 36) {
+            setIsMenuOpen(true);
+            setIsSidebarCollapsed(false);
+          }
+        }}
+        onPointerUp={() => {
+          dragStartXRef.current = null;
+          setIsDraggingSideMenu(false);
+          setSideMenuDragProgress(0);
+        }}
+        onPointerCancel={() => {
+          dragStartXRef.current = null;
+          setIsDraggingSideMenu(false);
+          setSideMenuDragProgress(0);
+        }}
+        onClick={() => setIsSidebarCollapsed((prev) => !prev)}
+        className="hidden lg:flex items-center justify-center fixed z-50 h-16 w-11 rounded-r-full bg-white/90 border border-white/70 shadow-sm backdrop-blur-xl text-slate-600 transition-all duration-300 hover:shadow-md hover:bg-white"
+        style={{
+          top: "24vh",
+          left: isSidebarCollapsed ? 68 : 298,
+          transform: `translateX(${sideMenuDragProgress}px)`,
+          opacity: 0.92,
+        }}
+        title={isSidebarCollapsed ? "Expandir menu" : "Recolher menu"}
+      >
+        {isSidebarCollapsed ? (
+          <ChevronRight size={18} />
+        ) : (
+          <ChevronLeft size={18} />
+        )}
+      </button>
 
       {/* Sidebar mobile */}
       {isMenuOpen && (

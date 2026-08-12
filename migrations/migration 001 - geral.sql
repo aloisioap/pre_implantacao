@@ -34,6 +34,33 @@ create table if not exists public.vistorias (
 
 
 -- ============================================================
+-- 2.5 VISTORIADORES - TIMESTAMPS EXISTENTES
+-- ============================================================
+
+alter table public.vistoriadores
+add column if not exists created_at timestamptz
+not null default now();
+
+alter table public.vistoriadores
+add column if not exists updated_at timestamptz
+not null default now();
+
+alter table public.vistoriadores
+alter column created_at set default now();
+
+alter table public.vistoriadores
+alter column updated_at set default now();
+
+update public.vistoriadores
+set created_at = now()
+where created_at is null;
+
+update public.vistoriadores
+set updated_at = now()
+where updated_at is null;
+
+
+-- ============================================================
 -- 3. ADICIONAR COLUNAS QUE POSSAM ESTAR FALTANDO
 -- ============================================================
 
