@@ -30,6 +30,7 @@ import {
 import { checklist } from "@/data/checklist";
 import { StatusAvaliacao, Vistoriador } from "@/types/vistoria";
 import { supabase } from "./supabaseClient";
+import SlideToUnlock from "@/components/SlideToUnlock";
 
 /* =========================================================
    TIPOS
@@ -41,9 +42,7 @@ type ModalState =
   | "ressalva"
   | "nao_possui"
   | "gestao_vistoriadores"
-  | "novo_usuario"
   | "editar_vistoriador"
-  | "confirmar_exclusao"
   | null;
 
 type VistoriadorExtended = Vistoriador & {
@@ -314,6 +313,8 @@ export default function PreImplantacaoApp() {
   const [isSaving, setIsSaving] = useState(false);
   const [deletingVistoriadorId, setDeletingVistoriadorId] = useState<string | null>(null);
   const [vistoriadorSearch, setVistoriadorSearch] = useState("");
+  const [showAddUserForm, setShowAddUserForm] = useState(false);
+  const [deletingUserId, setDeletingUserId] = useState<string | null>(null);
   const [snackbar, setSnackbar] = useState<string | null>(null);
 
   /* =======================================================
@@ -551,8 +552,8 @@ export default function PreImplantacaoApp() {
   ======================================================= */
 
   const handleAddVistoriador = async () => {
-    const nome = novoVistoriador.nome.trim();
-    const funcao = novoVistoriador.funcao.trim();
+    const nome = vistoriadorModalFields.nome.trim();
+    const funcao = vistoriadorModalFields.funcao.trim();
 
     if (!nome || !funcao) {
       return;
@@ -608,8 +609,10 @@ export default function PreImplantacaoApp() {
       });
       setVistoriadorModalFields({ nome: "", funcao: "" });
 
-      /* fecha modal */
-      setModalAberto(null);
+      /* fecha formulário de adição */
+      setShowAddUserForm(false);
+      
+      showSnackbar("Vistoriador adicionado com sucesso!");
     } catch (error) {
       console.error(
         "Erro inesperado ao adicionar vistoriador:",
@@ -628,12 +631,6 @@ export default function PreImplantacaoApp() {
     setSelectedVistoriador(null);
     setVistoriadorModalFields({ nome: "", funcao: "" });
     setModalAberto(null);
-  };
-
-  const openNovoVistoriadorModal = () => {
-    setSelectedVistoriador(null);
-    setVistoriadorModalFields({ nome: "", funcao: "" });
-    setModalAberto("novo_usuario");
   };
 
   const openEditarVistoriadorModal = (vistoriador: VistoriadorExtended) => {
@@ -693,11 +690,6 @@ export default function PreImplantacaoApp() {
     } finally {
       setIsSaving(false);
     }
-  };
-
-  const openConfirmDeleteModal = (vistoriador: VistoriadorExtended) => {
-    setSelectedVistoriador(vistoriador);
-    setModalAberto("confirmar_exclusao");
   };
 
   /* =======================================================
@@ -1963,7 +1955,11 @@ export default function PreImplantacaoApp() {
                     </label>
 
                     <button
-                      onClick={openNovoVistoriadorModal}
+                      onClick={() =>
+                        setModalAberto(
+                          "gestao_vistoriadores"
+                        )
+                      }
                       className="
                         text-[10px]
                         font-black
@@ -1984,8 +1980,8 @@ export default function PreImplantacaoApp() {
                           COLORS.dark,
                       }}
                     >
-                      <Plus size={13} />
-                      NOVO
+                      <Users size={13} />
+                      GERENCIAR
                     </button>
                   </div>
 
@@ -2049,88 +2045,7 @@ export default function PreImplantacaoApp() {
                         )
                       )}
                     </select>
-
-                    <button
-                      type="button"
-                      onClick={() =>
-                        setModalAberto(
-                          "gestao_vistoriadores"
-                        )
-                      }
-                      className="
-                        w-11
-                        h-11
-                        rounded-xl
-                        flex
-                        items-center
-                        justify-center
-                        text-white
-                        shadow-lg
-                        hover:scale-105
-                        active:scale-95
-                        transition-transform
-                      "
-                      style={{
-                        background:
-                          `linear-gradient(135deg, ${COLORS.cerulean}, ${COLORS.petrol})`,
-                      }}
-                      title="Gerenciar vistoriadores"
-                    >
-                      <UserPlus
-                        size={19}
-                      />
-                    </button>
                   </div>
-
-                  {vistoriadores.length > 0 && (
-                    <div className="mt-4 rounded-3xl border border-slate-200 bg-slate-50/80 p-3 space-y-2">
-                      <div className="flex items-center justify-between gap-2">
-                        <p className="text-[10px] font-black uppercase tracking-[0.2em] text-slate-500">
-                          Vistoriadores cadastrados
-                        </p>
-                        <span className="text-[10px] text-slate-400">
-                          {vistoriadores.length}
-                        </span>
-                      </div>
-
-                      <div className="space-y-2">
-                        {vistoriadores.map((v) => (
-                          <div
-                            key={v.id}
-                            className="flex items-center justify-between gap-2 rounded-2xl border border-white bg-white/80 px-3 py-2"
-                          >
-                            <button
-                              type="button"
-                              onClick={() => void handleSetVistoriador(v)}
-                              className="text-left min-w-0 flex-1 text-[12px] font-semibold text-slate-700 truncate"
-                            >
-                              {v.nome} ({v.funcao})
-                            </button>
-
-                            <div className="flex items-center gap-2">
-                              <button
-                                type="button"
-                                onClick={() => openEditarVistoriadorModal(v)}
-                                title="Editar vistoriador"
-                                className="w-8 h-8 rounded-md flex items-center justify-center text-slate-600 hover:bg-slate-100 transition"
-                              >
-                                <Edit3 size={14} />
-                              </button>
-
-                              <button
-                                type="button"
-                                onClick={() => openConfirmDeleteModal(v)}
-                                title="Remover vistoriador"
-                                className="w-8 h-8 rounded-md flex items-center justify-center text-rose-600 hover:bg-rose-50 transition"
-                              >
-                                <Trash2 size={14} />
-                              </button>
-                            </div>
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-                  )}
 
                   {!vistoria.vistoriador && (
                     <p className="text-[11px] text-amber-700 mt-2">
@@ -2449,17 +2364,21 @@ export default function PreImplantacaoApp() {
           {tabBar}
         </div>
 
-        {/* NOVO VISTORIADOR */}
+        {/* GESTÃO DE VISTORIADORES */}
 
         {modalAberto === "gestao_vistoriadores" && (
         <div className="fixed inset-0 z-[100] flex items-center justify-center p-4">
           <div
             className="absolute inset-0 bg-slate-900/20 backdrop-blur-md"
-            onClick={() => setModalAberto(null)}
+            onClick={() => {
+              setModalAberto(null);
+              setShowAddUserForm(false);
+              setDeletingUserId(null);
+            }}
           />
 
-          <div className="relative z-10 w-full max-w-3xl rounded-[2rem] p-6 bg-white/95 backdrop-blur-2xl border border-white shadow-[0_30px_80px_rgba(28,133,168,0.25)]">
-            <div className="flex flex-col gap-5 lg:flex-row lg:items-center lg:justify-between mb-6">
+          <div className="relative z-10 w-full max-w-2xl rounded-[2rem] p-6 bg-white/95 backdrop-blur-2xl border border-white shadow-[0_30px_80px_rgba(28,133,168,0.25)] max-h-[90vh] overflow-y-auto">
+            <div className="flex items-center justify-between mb-6">
               <div className="flex items-center gap-3">
                 <div
                   className="w-14 h-14 rounded-3xl flex items-center justify-center"
@@ -2481,115 +2400,154 @@ export default function PreImplantacaoApp() {
 
               <button
                 type="button"
-                onClick={() => setModalAberto(null)}
-                className="w-11 h-11 rounded-full bg-white border border-slate-200 flex items-center justify-center text-slate-400 hover:text-slate-700"
+                onClick={() => {
+                  setModalAberto(null);
+                  setShowAddUserForm(false);
+                  setDeletingUserId(null);
+                }}
+                className="w-11 h-11 rounded-full bg-white border border-slate-200 flex items-center justify-center text-slate-400 hover:text-slate-700 flex-shrink-0"
               >
                 <X size={18} />
               </button>
             </div>
 
-            <div className="grid grid-cols-1 xl:grid-cols-[1.3fr_0.9fr] gap-5">
-              <div className="space-y-4">
-                <div className="space-y-2">
-                  <div className="flex items-center justify-between gap-3">
-                    <label className="text-[11px] font-black uppercase tracking-[0.22em] text-slate-500">
-                      Buscar vistoriadores
-                    </label>
-                    <span className="text-[11px] font-black text-slate-400">{vistoriadores.length} cadastrados</span>
-                  </div>
-
+            {/* Seção de Adicionar Novo Usuário */}
+            {showAddUserForm && (
+              <div className="mb-6 rounded-2xl border border-slate-200 bg-slate-50 p-4 space-y-3">
+                <p className="text-[10px] font-black uppercase tracking-[0.22em] text-slate-500">Novo vistoriador</p>
+                <div>
+                  <label className="text-[11px] font-black text-slate-700 mb-1.5 block">Nome completo</label>
                   <input
-                    value={vistoriadorSearch}
-                    onChange={(event) => setVistoriadorSearch(event.target.value)}
-                    placeholder="Nome ou função"
-                    className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-700 outline-none focus:border-slate-300"
+                    value={vistoriadorModalFields.nome}
+                    onChange={(event) => setVistoriadorModalFields((prev) => ({ ...prev, nome: event.target.value }))}
+                    placeholder="Ex.: João da Silva"
+                    className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-700 outline-none focus:border-slate-300"
                   />
                 </div>
-
-                <div className="rounded-[2rem] border border-slate-200 bg-slate-50 p-4 space-y-3 max-h-[52vh] overflow-y-auto">
-                  {vistoriadores.filter((v) =>
-                    `${v.nome} ${v.funcao}`.toLowerCase().includes(vistoriadorSearch.toLowerCase())
-                  ).length === 0 ? (
-                    <p className="text-sm text-slate-500">Nenhum vistoriador encontrado.</p>
-                  ) : (
-                    vistoriadores
-                      .filter((v) =>
-                        `${v.nome} ${v.funcao}`.toLowerCase().includes(vistoriadorSearch.toLowerCase())
-                      )
-                      .map((v) => (
-                        <div key={v.id} className="rounded-3xl border border-slate-200 bg-white shadow-sm p-4">
-                          <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
-                            <div className="min-w-0">
-                              <p className="text-sm font-black text-slate-700 truncate">{v.nome}</p>
-                              <p className="text-[11px] text-slate-500 mt-1 truncate">{v.funcao}</p>
-                            </div>
-                            <div className="flex items-center gap-2">
-                              <button
-                                type="button"
-                                onClick={() => openEditarVistoriadorModal(v)}
-                                className="rounded-full px-3 py-2 text-[10px] font-black text-slate-700 bg-slate-100 border border-slate-200 hover:bg-slate-200 transition"
-                              >
-                                Editar
-                              </button>
-                            </div>
-                          </div>
-
-                          <div className="mt-3 flex flex-wrap gap-2 text-[10px] text-slate-400">
-                            {v.created_at && <span>Criado em {new Date(v.created_at).toLocaleDateString("pt-BR")}</span>}
-                            {v.updated_at && <span>Atualizado em {new Date(v.updated_at).toLocaleDateString("pt-BR")}</span>}
-                          </div>
-                        </div>
-                      ))
-                  )}
+                <div>
+                  <label className="text-[11px] font-black text-slate-700 mb-1.5 block">Função</label>
+                  <input
+                    value={vistoriadorModalFields.funcao}
+                    onChange={(event) => setVistoriadorModalFields((prev) => ({ ...prev, funcao: event.target.value }))}
+                    placeholder="Ex.: Engenheiro Clínico"
+                    className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-700 outline-none focus:border-slate-300"
+                  />
+                </div>
+                <div className="flex gap-2">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setShowAddUserForm(false);
+                      setVistoriadorModalFields({ nome: "", funcao: "" });
+                    }}
+                    className="flex-1 rounded-2xl border border-slate-200 py-2 text-sm font-black text-slate-700 hover:bg-slate-100 transition"
+                  >
+                    Cancelar
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => void handleAddVistoriador()}
+                    disabled={!vistoriadorModalFields.nome.trim() || !vistoriadorModalFields.funcao.trim() || isSaving}
+                    className="flex-1 rounded-2xl py-2 text-sm font-black text-white transition disabled:opacity-50"
+                    style={{ background: `linear-gradient(135deg, ${COLORS.cerulean}, ${COLORS.petrol})` }}
+                  >
+                    {isSaving ? "SALVANDO..." : "ADICIONAR"}
+                  </button>
                 </div>
               </div>
+            )}
 
-            </div>
-          </div>
-        </div>
-      )}
-
-      {modalAberto === "novo_usuario" && (
-        <div className="fixed inset-0 z-[110] flex items-center justify-center p-4">
-          <div className="absolute inset-0 bg-slate-900/30 backdrop-blur-sm" onClick={closeVistoriadorModal} />
-          <div className="relative z-10 w-full max-w-xl rounded-[2rem] bg-white/95 p-6 border border-white shadow-[0_30px_80px_rgba(28,133,168,0.25)]">
-            <div className="flex items-center justify-between mb-5">
-              <div>
-                <p className="text-[10px] font-black uppercase tracking-[0.22em] text-slate-500">Novo vistoriador</p>
-                <h3 className="text-xl font-black text-slate-700 mt-1">Cadastrar novo auditor</h3>
-              </div>
-              <button type="button" onClick={closeVistoriadorModal} className="w-11 h-11 rounded-full bg-slate-100 flex items-center justify-center text-slate-600 hover:text-slate-900 transition">
-                <X size={18} />
-              </button>
-            </div>
-            <div className="space-y-4">
-              <div>
-                <label className="text-[11px] font-black text-slate-700 mb-1.5 block">Nome completo</label>
-                <input
-                  value={vistoriadorModalFields.nome}
-                  onChange={(event) => setVistoriadorModalFields((prev) => ({ ...prev, nome: event.target.value }))}
-                  placeholder="Ex.: João da Silva"
-                  className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-700 outline-none focus:border-slate-300"
-                />
-              </div>
-              <div>
-                <label className="text-[11px] font-black text-slate-700 mb-1.5 block">Função</label>
-                <input
-                  value={vistoriadorModalFields.funcao}
-                  onChange={(event) => setVistoriadorModalFields((prev) => ({ ...prev, funcao: event.target.value }))}
-                  placeholder="Ex.: Engenheiro Clínico"
-                  className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-700 outline-none focus:border-slate-300"
-                />
-              </div>
+            {/* Botão de Adicionar Novo */}
+            {!showAddUserForm && (
               <button
                 type="button"
-                onClick={() => void handleAddVistoriador()}
-                disabled={!vistoriadorModalFields.nome.trim() || !vistoriadorModalFields.funcao.trim() || isSaving}
-                className="w-full rounded-2xl py-3 text-sm font-black text-white transition disabled:opacity-50"
-                style={{ background: `linear-gradient(135deg, ${COLORS.cerulean}, ${COLORS.petrol})` }}
+                onClick={() => {
+                  setShowAddUserForm(true);
+                  setVistoriadorModalFields({ nome: "", funcao: "" });
+                }}
+                className="w-full mb-6 rounded-2xl border-2 border-dashed py-3 text-sm font-black transition"
+                style={{
+                  borderColor: COLORS.dark,
+                  color: COLORS.dark,
+                }}
               >
-                {isSaving ? "SALVANDO..." : "ADICIONAR VISTORIADOR"}
+                + NOVO VISTORIADOR
               </button>
+            )}
+
+            {/* Busca e Lista */}
+            <div className="space-y-3">
+              <div className="space-y-2">
+                <div className="flex items-center justify-between gap-3">
+                  <label className="text-[11px] font-black uppercase tracking-[0.22em] text-slate-500">
+                    Vistoriadores cadastrados
+                  </label>
+                  <span className="text-[11px] font-black text-slate-400">{vistoriadores.length}</span>
+                </div>
+
+                <input
+                  value={vistoriadorSearch}
+                  onChange={(event) => setVistoriadorSearch(event.target.value)}
+                  placeholder="Buscar por nome ou função..."
+                  className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-700 outline-none focus:border-slate-300"
+                />
+              </div>
+
+              <div className="rounded-[2rem] border border-slate-200 bg-slate-50 p-4 space-y-3 max-h-[50vh] overflow-y-auto">
+                {vistoriadores.filter((v) =>
+                  `${v.nome} ${v.funcao}`.toLowerCase().includes(vistoriadorSearch.toLowerCase())
+                ).length === 0 ? (
+                  <p className="text-sm text-slate-500 text-center py-8">Nenhum vistoriador encontrado.</p>
+                ) : (
+                  vistoriadores
+                    .filter((v) =>
+                      `${v.nome} ${v.funcao}`.toLowerCase().includes(vistoriadorSearch.toLowerCase())
+                    )
+                    .map((v) => (
+                      <div key={v.id} className="rounded-2xl border border-slate-200 bg-white shadow-sm p-3">
+                        <div className="flex items-center justify-between gap-2 mb-3">
+                          <div className="min-w-0 flex-1">
+                            <p className="text-sm font-black text-slate-700 truncate">{v.nome}</p>
+                            <p className="text-[11px] text-slate-500 truncate">{v.funcao}</p>
+                          </div>
+                          <button
+                            type="button"
+                            onClick={() => openEditarVistoriadorModal(v)}
+                            className="flex-shrink-0 rounded-lg px-3 py-1.5 text-[10px] font-black text-slate-700 bg-slate-100 border border-slate-200 hover:bg-slate-200 transition"
+                          >
+                            Editar
+                          </button>
+                        </div>
+
+                        {/* Slide to Unlock para Deletar */}
+                        {deletingUserId === v.id ? (
+                          <SlideToUnlock
+                            label="Slide para confirmar exclusão"
+                            color="#dc2626"
+                            onConfirm={() => {
+                              void handleDeleteVistoriador(v.id);
+                              setDeletingUserId(null);
+                            }}
+                          />
+                        ) : (
+                          <button
+                            type="button"
+                            onClick={() => setDeletingUserId(v.id)}
+                            className="w-full rounded-lg py-2 text-[10px] font-black text-white bg-rose-600 hover:bg-rose-700 transition"
+                          >
+                            <Trash2 size={14} className="inline mr-1" /> Excluir
+                          </button>
+                        )}
+
+                        {v.created_at && (
+                          <p className="text-[10px] text-slate-400 mt-2">
+                            Criado em {new Date(v.created_at).toLocaleDateString("pt-BR")}
+                          </p>
+                        )}
+                      </div>
+                    ))
+                )}
+              </div>
             </div>
           </div>
         </div>
@@ -2633,39 +2591,6 @@ export default function PreImplantacaoApp() {
                 style={{ background: `linear-gradient(135deg, ${COLORS.cerulean}, ${COLORS.petrol})` }}
               >
                 {isSaving ? "SALVANDO..." : "ATUALIZAR VISTORIADOR"}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {modalAberto === "confirmar_exclusao" && selectedVistoriador && (
-        <div className="fixed inset-0 z-[110] flex items-center justify-center p-4">
-          <div className="absolute inset-0 bg-slate-900/30 backdrop-blur-sm" onClick={closeVistoriadorModal} />
-          <div className="relative z-10 w-full max-w-md rounded-[2rem] bg-white/95 p-6 border border-white shadow-[0_30px_80px_rgba(28,133,168,0.25)]">
-            <div className="flex items-center justify-between mb-5">
-              <div>
-                <p className="text-[10px] font-black uppercase tracking-[0.22em] text-slate-500">Confirmar exclusão</p>
-                <h3 className="text-xl font-black text-slate-700 mt-1">Remover {selectedVistoriador.nome}?</h3>
-              </div>
-              <button type="button" onClick={closeVistoriadorModal} className="w-11 h-11 rounded-full bg-slate-100 flex items-center justify-center text-slate-600 hover:text-slate-900 transition">
-                <X size={18} />
-              </button>
-            </div>
-            <p className="text-sm text-slate-600 mb-5">A exclusão remove o vistoriador somente da interface atual; os dados permanecem no banco.</p>
-            <div className="flex gap-3">
-              <button type="button" onClick={closeVistoriadorModal} className="flex-1 rounded-2xl border border-slate-200 py-3 text-sm font-black text-slate-700 hover:bg-slate-50 transition">Cancelar</button>
-              <button
-                type="button"
-                onClick={() => {
-                  if (selectedVistoriador) {
-                    void handleDeleteVistoriador(selectedVistoriador.id);
-                  }
-                  closeVistoriadorModal();
-                }}
-                className="flex-1 rounded-2xl bg-rose-600 py-3 text-sm font-black text-white hover:bg-rose-700 transition"
-              >
-                Confirmar exclusão
               </button>
             </div>
           </div>
